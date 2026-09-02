@@ -10,9 +10,39 @@ use App\Karyawan;
 use App\StockBarang;
 use App\Spb;
 use App\SpbPurchaseOrder;
+use App\SpbItem;
+use App\Vendor;
 
 class PrintPdfController extends Controller
 {
+
+    /**
+     * Surat permintaan penawaran harga ke 1 vendor untuk 1 SPPB.
+     * 1 surat berisi semua barang di SPPB itu yang diminta ke vendor tsb.
+     */
+    public function printRfq(Request $request)
+    {
+        $spbId    = $request->input('spb_id');
+        $vendorId = $request->input('vendor_id');
+
+        $spb    = Spb::find($spbId);
+        $vendor = Vendor::find($vendorId);
+
+        if (!$spb || !$vendor) {
+            abort(404, 'SPB atau Vendor Not Found');
+        }
+
+        $items = SpbItem::where('spb_id', $spb->id)
+                    ->whereHas('requestedVendors', function ($q) use ($vendorId) {
+                        $q->where('vendor_id', $vendorId);
+                    })->get();
+
+        if ($items->count() < 1) {
+            abort(404, 'Vendor ini belum diminta penawaran untuk barang di SPPB ini');
+        }
+
+        return view('pdf.rfq', compact('spb', 'vendor', 'items'));
+    }
 
     public function printSppb($id)
     {
@@ -37,6 +67,10 @@ class PrintPdfController extends Controller
 
         if (!$po) {
             abort(404, 'Purchase Order Not Found');
+        }
+
+        if (!$po->sign_dibuat || !$po->sign_disetujui) {
+            abort(403, 'Nama penandatangan PO (Dibuat/Diajukan/Disetujui Oleh) belum diisi. Isi dulu sebelum bisa preview.');
         }
 
         // Total sebelum diskon (jumlah harga semua barang)

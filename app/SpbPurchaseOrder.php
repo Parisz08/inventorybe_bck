@@ -9,7 +9,7 @@ class SpbPurchaseOrder extends Model
     protected $table = 'spb_purchase_orders';
 
     protected $fillable = [
-        'spb_id', 'vendor_id', 'supplier', 'po_number', 'po_date', 'po_total', 'status',
+        'spb_id', 'vendor_id', 'supplier', 'diajukan_oleh', 'po_number', 'po_date', 'po_total', 'status',
         'resolusi_note', 'resolusi_at',
         'invoice_number', 'invoice_date', 'invoice_amount',
         'payment_date', 'payment_amount', 'payment_method',

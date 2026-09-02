@@ -22,6 +22,11 @@ class SpbItem extends Model
         return $this->hasMany(SpbItemCondition::class, 'spb_item_id')->orderBy('round', 'asc');
     }
 
+    public function requestedVendors()
+    {
+        return $this->hasMany(SpbItemRequestedVendor::class, 'spb_item_id');
+    }
+
     public function purchaseOrder()
     {
         return $this->belongsTo(SpbPurchaseOrder::class, 'spb_purchase_order_id');

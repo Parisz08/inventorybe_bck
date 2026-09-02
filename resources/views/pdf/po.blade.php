@@ -1,188 +1,1119 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ $po->po_number }}</title>
-  <style>
-    @page { size: A4; margin: 12mm; }
-    * { box-sizing: border-box; }
-    body { font-family: 'Calibri', Arial, sans-serif; font-size: 11.5px; color: #000; margin: 0; }
-    .sheet { width: 100%; max-width: 820px; margin: 0 auto; padding: 10px; }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ $po->po_number }}</title>
 
-    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
-    .header-table td { vertical-align: middle; padding: 0; }
-    .logo-cell { width: 90px; }
-    .logo-cell img { width: 75px; }
-    .company-cell h1 { font-size: 13px; margin: 0; font-weight: bold; }
-    .company-cell p { font-size: 9px; margin: 0; }
+<style>
+@page{
+    size:A4 portrait;
+    margin:0;
+}
 
-    .doc-title { text-align: center; font-size: 20px; font-weight: bold; letter-spacing: 2px; margin: 8px 0 14px 0; }
+*{
+    box-sizing:border-box;
+}
 
-    table.info { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-    table.info td { vertical-align: top; padding: 1px 0; font-size: 11px; }
-    table.info td.label { width: 110px; font-weight: bold; }
-    table.info td.sep { width: 10px; }
-    .info-left { width: 52%; }
-    .info-right { width: 48%; padding-left: 14px; }
-    .info-block-title { font-weight: bold; margin-bottom: 2px; }
+html,body{
+    margin:0;
+    padding:0;
+    width:100%;
+    background:#fff;
+    color:#000;
+}
 
-    table.items { width: 100%; border-collapse: collapse; margin-bottom: 4px; }
-    table.items th, table.items td { border: 1px solid #000; padding: 4px 6px; font-size: 11px; }
-    table.items th { text-align: center; font-weight: bold; background-color: #f2f2f2; }
-    table.items td.no { text-align: center; width: 28px; }
-    table.items td.qty { text-align: center; width: 50px; }
-    table.items td.unit { text-align: center; width: 55px; }
-    table.items td.price, table.items td.total { text-align: right; width: 95px; }
+body{
+    font-family:Arial,Helvetica,sans-serif;
+    font-size:7.5px;
+}
 
-    table.totals { width: 260px; margin-left: auto; border-collapse: collapse; margin-bottom: 14px; }
-    table.totals td { padding: 3px 6px; font-size: 11px; }
-    table.totals td.tlabel { text-align: left; }
-    table.totals td.tval { text-align: right; width: 120px; }
-    table.totals tr.grand td { border-top: 2px solid #000; font-weight: bold; font-size: 12.5px; }
+/* =========================
+   BUTTON
+========================= */
 
-    .term-row { margin-bottom: 10px; font-size: 11px; }
-    .term-row .label { font-weight: bold; display: inline-block; width: 110px; }
+.no-print{
+    width:100%;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:10px;
+    margin:12px 0;
+}
 
-    .catatan { margin-bottom: 20px; }
-    .catatan h6 { font-size: 11px; font-weight: bold; margin: 0 0 4px 0; }
-    .catatan p { font-size: 10.5px; margin: 1px 0; }
+.no-print button{
+    padding:7px 15px;
+    font-size:11px;
+    cursor:pointer;
+    border:1px solid #ccc;
+    border-radius:4px;
+    background:#fff;
+}
 
-    table.signature { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    table.signature td { text-align: center; vertical-align: top; padding: 0 8px; font-size: 11px; }
-    table.signature .sign-title { font-weight: bold; margin-bottom: 55px; }
-    table.signature .sign-name { border-top: 1px solid #000; display: inline-block; min-width: 130px; padding-top: 4px; }
-    table.signature .sign-role { font-size: 10.5px; margin-top: 2px; }
+.no-print .primary{
+    background:#2dce89;
+    color:#fff;
+    border-color:#2dce89;
+}
 
-    .footer-note { font-size: 9px; color: #444; margin-top: 22px; }
+/* =========================
+   PAGE
+========================= */
 
-    @media print { .no-print { display: none !important; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-    .no-print { text-align: center; margin-bottom: 14px; margin-top: 24px; display: flex; justify-content: center; gap: 24px; }
-    .no-print button { padding: 8px 18px; font-size: 13px; cursor: pointer; border-radius: 4px; border: 1px solid #ccc; background: #fff; }
-    .no-print button.primary { background: #2dce89; color: #fff; border-color: #2dce89; }
-  </style>
+.page{
+    width:100%;
+    display:flex;
+    justify-content:center;
+    align-items:flex-start;
+}
+
+.sheet{
+    width:194mm;
+    margin:0 auto;
+    background:#fff;
+    border:1.5px solid #000;
+    overflow:hidden;
+}
+
+/* =========================
+   HEADER
+========================= */
+
+.header{
+    height:17mm;
+    position:relative;
+}
+
+.logo{
+    position:absolute;
+    left:4mm;
+    top:1.8mm;
+    width:20mm;
+    height:13.5mm;
+    object-fit:contain;
+}
+
+.company{
+    position:absolute;
+    left:26mm;
+    top:3mm;
+    font-size:12px;
+    font-weight:bold;
+    white-space:nowrap;
+}
+
+.company .red{
+    color:#c9272c;
+}
+
+.company .blue{
+    color:#1c4e91;
+}
+
+.company-subtitle{
+    position:absolute;
+    left:26mm;
+    top:8.5mm;
+    font-size:5.7px;
+    letter-spacing:.55px;
+    color:#777;
+    font-weight:bold;
+}
+
+/* =========================
+   TITLE
+========================= */
+
+.title{
+    height:11mm;
+    text-align:center;
+    padding-top:.5mm;
+    font-size:15px;
+    font-weight:bold;
+}
+
+/* =========================
+   TOP INFO (Garis Dihilangkan & Posisi Disesuaikan)
+========================= */
+
+table.top-info{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+}
+
+.top-info td{
+    vertical-align:top;
+    padding:0;
+}
+
+.top-left{
+    width:52%;
+    padding:0 4mm 2mm 26mm !important; /* Diberi margin kiri 26mm agar sejajar dengan PT */
+}
+
+.top-right{
+    width:48%;
+    padding:0 0 2mm 4mm !important;
+}
+
+.top-inner{
+    width:100%;
+    border-collapse:collapse;
+}
+
+.top-inner td{
+    padding:.65mm 0;
+    vertical-align:top;
+    font-size:7.5px;
+    border-bottom:none !important; /* Semua garis di bagian ini dihilangkan */
+}
+
+.top-label{
+    width:12mm;
+    white-space:nowrap;
+}
+
+.top-colon{
+    width:2mm;
+    text-align:center;
+}
+
+.top-value{
+    height:4mm;
+}
+
+.supplier-name{
+    font-size:8px;
+    font-weight:bold;
+}
+
+/* =========================
+   BOX
+========================= */
+
+table.full-box{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+}
+
+.full-box td{
+    border:.8px solid #000;
+    vertical-align:top;
+    padding:1.6mm 0;
+}
+
+.box-title{
+    margin:0 3.5mm 1.5mm;
+    font-size:7px;
+    font-weight:bold;
+    text-decoration:underline;
+    line-height:1.1;
+}
+
+.box-line{
+    margin:0 3.5mm 1mm;
+    font-size:7px;
+    line-height:1.1;
+}
+
+.box-bold{
+    font-size:7.5px;
+    font-weight:bold;
+}
+
+.ship{
+    width:34%;
+}
+
+.bill{
+    width:34%;
+}
+
+.division{
+    width:32%;
+}
+
+.division-content{
+    text-align:center;
+    padding-top:2mm;
+}
+
+.division-main{
+    font-size:9px;
+    font-weight:bold;
+    margin-bottom:1.3mm;
+}
+
+.division-small{
+    font-size:7px;
+    margin-bottom:.8mm;
+}
+
+/* =========================
+   SECOND BOX
+========================= */
+
+.origin{
+    width:34%;
+}
+
+.shipping{
+    width:23%;
+}
+
+.currency{
+    width:13%;
+}
+
+.reference{
+    width:30%;
+}
+
+.center-value{
+    text-align:center;
+    margin-top:3.5mm;
+    font-size:7.5px;
+}
+
+.reference-value{
+    margin:1mm 3.5mm 0;
+    font-size:6.7px;
+    font-style:italic;
+    min-height:7mm;
+}
+
+/* =========================
+   ITEM SPACER
+========================= */
+
+.items-spacer{
+    height:2.5mm;
+    border-bottom:.8px solid #000;
+}
+
+/* =========================
+   ITEMS
+========================= */
+
+table.items{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+}
+
+.items th,
+.items td{
+    border:.8px solid #000;
+}
+
+.items th{
+    height:7.5mm;
+    padding:.6mm;
+    text-align:center;
+    vertical-align:middle;
+    font-size:7px;
+    font-weight:bold;
+    line-height:1;
+}
+
+.items td{
+    height:5.1mm;
+    padding:.55mm 1.5mm;
+    vertical-align:middle;
+    font-size:6.8px;
+    line-height:1;
+}
+
+.items .no{
+    width:5%;
+    text-align:center;
+}
+
+.items .name{
+    width:47%;
+}
+
+.items .qty{
+    width:9%;
+    text-align:center;
+}
+
+.items .unit{
+    width:9%;
+    text-align:center;
+}
+
+.items .price{
+    width:14%;
+    text-align:right;
+}
+
+.items .total{
+    width:16%;
+    text-align:right;
+}
+
+.item-name{
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+/* =========================
+   TOTAL
+========================= */
+
+table.totals{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+}
+
+.totals td{
+    height:5mm;
+    padding:.55mm 2.5mm;
+    border:.8px solid #000;
+    font-size:7px;
+}
+
+.totals .label{
+    width:84%;
+    text-align:right;
+}
+
+.totals .value{
+    width:16%;
+    text-align:right;
+    white-space:nowrap;
+}
+
+.totals .grand td{
+    height:6mm;
+    font-size:8px;
+    font-weight:bold;
+    border-top:1.5px solid #000;
+    border-bottom:1.5px solid #000;
+}
+
+/* =========================
+   TERMS
+========================= */
+
+.terms{
+    width:100%;
+    min-height:8mm;
+    display:grid;
+    grid-template-columns:29mm 3mm 1fr;
+    align-items:center;
+    border-bottom:.8px solid #000;
+}
+
+.terms-label{
+    padding:1.8mm 0;
+    font-size:7.5px;
+}
+
+.terms-colon{
+    text-align:center;
+    font-size:7.5px;
+}
+
+.terms-value{
+    padding:1.8mm 3.5mm 1.8mm 0;
+    font-size:7.5px;
+}
+
+/* =========================
+   REMARKS
+========================= */
+
+.remarks{
+    width:100%;
+    border-bottom:1.5px solid #000;
+}
+
+.remarks-title{
+    height:6mm;
+    padding:1.5mm 0;
+    font-size:7.5px;
+    font-weight:bold;
+    border-bottom:.8px solid #000;
+}
+
+.remark{
+    min-height:5mm;
+    padding:1.25mm 0;
+    font-size:6.8px;
+    line-height:1;
+    border-bottom:.7px solid #000;
+}
+
+.remark:last-child{
+    border-bottom:none;
+}
+
+/* =========================
+   SIGNATURE
+========================= */
+
+.signature{
+    width:100%;
+    height:23mm;
+    display:grid;
+    grid-template-columns:1fr 1fr;
+}
+
+.signature-box{
+    position:relative;
+    height:100%;
+    text-align:center;
+}
+
+.signature-title{
+    position:absolute;
+    top:2.5mm;
+    left:0;
+    width:100%;
+    font-size:7.5px;
+}
+
+.signature-name{
+    position:absolute;
+    bottom:5mm;
+    left:50%;
+    transform:translateX(-50%);
+    min-width:25mm;
+    padding:0 1.5mm .7mm;
+    border-bottom:.8px solid #000;
+    font-size:7.2px;
+    white-space:nowrap;
+}
+
+.signature-role{
+    position:absolute;
+    bottom:1.3mm;
+    left:0;
+    width:100%;
+    font-size:7.2px;
+    font-weight:bold;
+}
+
+/* =========================
+   FOOTER
+========================= */
+
+.footer{
+    width:100%;
+}
+
+.distribution{
+    width:100%;
+    padding:1mm 0;
+    font-size:6.7px;
+    font-style:italic;
+    line-height:1;
+    border-bottom:.8px solid #000;
+}
+
+.disclaimer{
+    width:100%;
+    padding:.8mm 4mm;
+    text-align:center;
+    font-size:6.2px;
+    line-height:1.1;
+}
+
+/* =========================
+   PRINT
+========================= */
+
+@media print{
+
+    .no-print{
+        display:none!important;
+    }
+
+    @page{
+        size:A4 portrait;
+        margin:0;
+    }
+
+    html,
+    body{
+        width:210mm;
+        height:297mm;
+        margin:0;
+        padding:0;
+        overflow:hidden;
+    }
+
+    .page{
+        width:210mm;
+        height:297mm;
+        margin:0;
+        padding:0;
+        display:flex;
+        justify-content:center;
+        align-items:center;
+    }
+
+    .sheet{
+        width:194mm;
+        margin:0 auto;
+        border:1.5px solid #000;
+    }
+
+    table,
+    tr,
+    td,
+    th{
+        page-break-inside:avoid!important;
+    }
+
+    body{
+        -webkit-print-color-adjust:exact;
+        print-color-adjust:exact;
+    }
+}
+</style>
 </head>
+
 <body>
 
-  <div class="no-print">
-    <button class="primary" onclick="window.print()">🖨️ Print / Simpan sebagai PDF</button>
-    <button onclick="window.close()">Tutup</button>
-  </div>
+<div class="no-print">
+    <button class="primary" onclick="window.print()">
+        🖨️ Print / Simpan sebagai PDF
+    </button>
 
-  <div class="sheet">
-    <!-- ============ HEADER ============ -->
-    <table class="header-table">
-      <tr>
-        <td class="logo-cell"><img src="{{ URL('bck.png') }}" alt="logo"></td>
-        <td class="company-cell">
-          <h1>PT. BUANA CENTRA KARYA</h1>
-          <p>PIPE MANUFACTURING &amp; STEEL FABRICATION</p>
-        </td>
-      </tr>
-    </table>
+    <button onclick="window.close()">
+        Tutup
+    </button>
+</div>
 
-    <div class="doc-title">PURCHASE ORDER</div>
+<div class="page">
+<div class="sheet">
 
-    <!-- ============ INFO (Kepada / PO No / Ship to / Divisi) ============ -->
-    <table class="info">
-      <tr>
-        <td class="info-left">
-          <div class="info-block-title">Kepada :</div>
-          {{ $po->supplier }}<br>
-          {{ optional($po->vendor)->address }}<br>
-          @if(optional($po->vendor)->phone)Telp. {{ $po->vendor->phone }}@endif
+<!-- HEADER -->
+<div class="header">
 
-          <div class="info-block-title" style="margin-top: 10px;">Kirim ke / Ship to :</div>
-          PT. Buana Centra Karya<br>
-          Jln. Raya Merak KM. 115 Rawa Arum,<br>
-          Cilegon Banten 42436<br>
-          Phone : 0254-572111/574222
-        </td>
-        <td class="info-right">
-          <table>
-            <tr><td class="label">PO No.</td><td class="sep">:</td><td>{{ $po->po_number }}</td></tr>
-            <tr><td class="label">Tanggal / Date</td><td class="sep">:</td><td>{{ \Carbon\Carbon::parse($po->po_date)->format('d-m-Y') }}</td></tr>
-            <tr><td class="label">Up</td><td class="sep">:</td><td>{{ optional($po->vendor)->pic }}</td></tr>
-            <tr><td class="label">Divisi</td><td class="sep">:</td><td>{{ optional($po->spb)->divisi }}</td></tr>
-            <tr><td class="label">Referensi SPPB</td><td class="sep">:</td><td>{{ optional($po->spb)->no_spb }}</td></tr>
-            <tr><td class="label">Currency</td><td class="sep">:</td><td>RUPIAH</td></tr>
-          </table>
-        </td>
-      </tr>
-    </table>
+    <img src="{{ URL('bck.png') }}"
+         class="logo"
+         alt="Logo BCK">
 
-    <!-- ============ ITEMS ============ -->
-    <table class="items">
-      <thead>
-        <tr>
-          <th style="width: 28px;">No.</th>
-          <th>Nama Barang</th>
-          <th style="width: 50px;">Jumlah</th>
-          <th style="width: 55px;">Satuan</th>
-          <th style="width: 95px;">Harga Satuan</th>
-          <th style="width: 95px;">Jumlah Harga</th>
-        </tr>
-      </thead>
-      <tbody>
-        @foreach ($po->items as $i => $item)
-        <tr>
-          <td class="no">{{ $i + 1 }}</td>
-          <td>{{ $item->material_name }}{{ $item->merek ? ' (Merk ' . $item->merek . ')' : '' }}</td>
-          <td class="qty">{{ $item->qty }}</td>
-          <td class="unit">{{ $item->unit }}</td>
-          <td class="price">{{ number_format($item->unit_price, 0, ',', '.') }}</td>
-          <td class="total">{{ number_format($item->line_total, 0, ',', '.') }}</td>
-        </tr>
-        @endforeach
-      </tbody>
-    </table>
-
-    <!-- ============ TOTALS ============ -->
-    <table class="totals">
-      <tr><td class="tlabel">Jumlah</td><td class="tval">{{ number_format($subtotal, 0, ',', '.') }}</td></tr>
-      <tr><td class="tlabel">Discount {{ $discountPercent }}%</td><td class="tval">{{ number_format($discount, 0, ',', '.') }}</td></tr>
-      <tr><td class="tlabel">Total</td><td class="tval">{{ number_format($total, 0, ',', '.') }}</td></tr>
-      <tr><td class="tlabel">PPN 12%</td><td class="tval">{{ number_format($ppn, 0, ',', '.') }}</td></tr>
-      <tr class="grand"><td class="tlabel">Grand Total</td><td class="tval">{{ number_format($grandTotal, 0, ',', '.') }}</td></tr>
-    </table>
-
-    <!-- ============ TERM & CATATAN ============ -->
-    <div class="term-row"><span class="label">Term / Condition</span>: {{ optional($po->vendor)->payment_term ?: '-' }}</div>
-
-    <div class="catatan">
-      <h6>Catatan :</h6>
-      <p>- Pengiriman Barang Paling Lambat 3 Hari Setelah PO Diterbitkan Kepada Pihak Supplier / Vendor</p>
-      <p>- Barang Akan Kami Kembalikan Apabila Tidak Sesuai Dengan Pesanan (PO)</p>
-      <p>- Semua Pengiriman Barang Harus Disertakan Dengan Nota / Faktur Dan Kwitansi</p>
-      <p>- Nomor PO Harus Dicantumkan Dalam Invoice</p>
+    <div class="company">
+        <span class="red">PT.</span>
+        <span class="blue">BUANA CENTRA KARYA</span>
     </div>
 
-    <!-- ============ SIGNATURE ============ -->
-    <table class="signature">
-      <tr>
-        <td style="width: 33%;">
-          <div class="sign-title">Dibuat Oleh,</div>
-          <div class="sign-name">{{ $po->updated_by ?: '' }}</div>
-          <div class="sign-role">Purchasing</div>
-        </td>
-        <td style="width: 34%;">
-          <div class="sign-title">Diajukan Oleh,</div>
-          <div class="sign-name">&nbsp;</div>
-          <div class="sign-role">Manager Dept.</div>
-        </td>
-        <td style="width: 33%;">
-          <div class="sign-title">Disetujui Oleh,</div>
-          <div class="sign-name">{{ optional($po->spb)->approved_by }}</div>
-          <div class="sign-role">Direktur</div>
-        </td>
-      </tr>
-    </table>
-
-    <div class="footer-note">
-      Distribusi: 1. Pemasok (Supplier), 2. Keuangan &amp; Akuntansi, 3. Arsip<br>
-      Dokumen ini milik PT. BCK, isi dari dokumen ini tidak diperkenankan untuk digandakan atau disalin baik seluruh atau sebagian tanpa izin tertulis.
+    <div class="company-subtitle">
+        STEEL PIPE MANUFACTURE &amp; FABRICATOR
     </div>
-  </div>
+
+</div>
+
+<!-- TITLE -->
+<div class="title">
+    PURCHASE ORDER
+</div>
+
+<!-- SUPPLIER / PO -->
+<table class="top-info">
+<tr>
+
+<td class="top-left">
+
+<table class="top-inner">
+
+<tr>
+<td class="top-label">Kepada</td>
+<td class="top-colon">:</td>
+<td class="top-value supplier-name">
+    {{ $po->supplier }}
+</td>
+</tr>
+
+<tr>
+<td></td>
+<td></td>
+<td class="top-value">
+    {{ optional($po->vendor)->address ?: '' }}
+</td>
+</tr>
+
+<tr>
+<td></td>
+<td></td>
+<td class="top-value">
+@if(optional($po->vendor)->phone)
+    Telp. {{ $po->vendor->phone }}
+@endif
+</td>
+</tr>
+
+</table>
+
+</td>
+
+<td class="top-right">
+
+<table class="top-inner">
+
+<tr>
+<td class="top-label" style="width: 22mm;">PO No.</td>
+<td class="top-colon">:</td>
+<td class="top-value">
+    {{ $po->po_number }}
+</td>
+</tr>
+
+<tr>
+<td class="top-label" style="width: 22mm;">Tanggal / Date</td>
+<td class="top-colon">:</td>
+<td class="top-value">
+    {{ $po->po_date ? \Carbon\Carbon::parse($po->po_date)->format('d F Y') : '' }}
+</td>
+</tr>
+
+<tr>
+<td class="top-label" style="width: 22mm;">Up</td>
+<td class="top-colon">:</td>
+<td class="top-value">
+    {{ $po->sign_dibuat ?: '' }}
+</td>
+</tr>
+
+</table>
+
+</td>
+
+</tr>
+</table>
+
+<!-- SHIP / BILL / DIVISI -->
+<table class="full-box">
+
+<tr>
+
+<td class="ship">
+
+<div class="box-title">
+Kirim ke / Ship to:
+</div>
+
+<div class="box-line box-bold">
+PT. Buana Centra Karya
+</div>
+
+<div class="box-line">
+Jln. Raya Merak KM. 115 Rawa Arum,
+</div>
+
+<div class="box-line">
+Cilegon Banten 42436
+</div>
+
+<div class="box-line">
+Phone : 0254-572111/574222
+</div>
+
+<div class="box-line">
+Fax : 0254-572333
+</div>
+
+</td>
+
+<td class="bill">
+
+<div class="box-title">
+Alamatkan Tagihan &amp; Lampirkan ke /<br>
+<i>Mail Invoice and Attachment to:</i>
+</div>
+
+<div class="box-line box-bold">
+PT. Buana Centra Karya
+</div>
+
+<div class="box-line box-bold">
+NPWP : 96.846.940.3-417.000
+</div>
+
+</td>
+
+<td class="division">
+
+<div class="box-title">
+Divisi :
+</div>
+
+<div class="division-content">
+
+<div class="division-main">
+{{ optional($po->spb)->divisi ?: 'HEAD QUARTER' }}
+</div>
+
+<div class="division-small">
+Office
+</div>
+
+<div class="division-small">
+SPPB - {{ optional($po->spb)->no_spb ?: '-' }}
+</div>
+
+</div>
+
+</td>
+
+</tr>
+
+</table>
+
+<!-- ORIGIN / SHIPPING / CURRENCY -->
+<table class="full-box">
+
+<tr>
+
+<td class="origin">
+
+<div class="box-title">
+Negara Asal / Country of Origin:
+</div>
+
+<div class="center-value">
+INDONESIA
+</div>
+
+</td>
+
+<td class="shipping">
+
+<div class="box-title">
+Shipping Terms
+</div>
+
+<div class="center-value">
+{{ data_get($po,'shipping_term') ?: data_get($po,'shipping_terms') ?: '-' }}
+</div>
+
+</td>
+
+<td class="currency">
+
+<div class="box-title">
+Currency
+</div>
+
+<div class="center-value">
+RUPIAH
+</div>
+
+</td>
+
+<td class="reference">
+
+<div class="box-title">
+Dasar Acuan No. PP / Kontrak /<br>
+<i>Reference PP No./ Contract :</i>
+</div>
+
+<div class="reference-value">
+{{ data_get($po,'reference_no') ?: data_get($po,'contract_no') ?: optional($po->spb)->no_spb ?: '-' }}
+</div>
+
+</td>
+
+</tr>
+
+</table>
+
+<div class="items-spacer"></div>
+
+@php
+    $items = $po->items ?? [];
+    $itemCount = count($items);
+    $displayRows = 11;
+@endphp
+
+<!-- ITEMS -->
+<table class="items">
+
+<thead>
+
+<tr>
+
+<th class="no">
+No.
+</th>
+
+<th class="name">
+Nama Barang
+</th>
+
+<th class="qty">
+Jumlah
+</th>
+
+<th class="unit">
+Satuan
+</th>
+
+<th class="price">
+Harga Satuan
+</th>
+
+<th class="total">
+Jumlah Harga
+</th>
+
+</tr>
+
+</thead>
+
+<tbody>
+
+@foreach($items as $i => $item)
+
+<tr>
+
+<td class="no">
+{{ $i + 1 }}
+</td>
+
+<td class="name">
+
+<div class="item-name">
+
+{{ $item->material_name }}
+
+@if($item->merek)
+    (Merk {{ $item->merek }})
+@endif
+
+</div>
+
+</td>
+
+<td class="qty">
+{{ $item->qty }}
+</td>
+
+<td class="unit">
+{{ $item->unit }}
+</td>
+
+<td class="price">
+{{ number_format($item->unit_price,0,',','.') }}
+</td>
+
+<td class="total">
+{{ number_format($item->line_total,0,',','.') }}
+</td>
+
+</tr>
+
+@endforeach
+
+
+@for($i = $itemCount; $i < $displayRows; $i++)
+
+<tr>
+
+<td class="no">
+{{ $i + 1 }}
+</td>
+
+<td class="name"></td>
+
+<td class="qty"></td>
+
+<td class="unit"></td>
+
+<td class="price"></td>
+
+<td class="total">
+-
+</td>
+
+</tr>
+
+@endfor
+
+</tbody>
+
+</table>
+
+@php
+    $dppLain = $total * 11 / 12;
+@endphp
+
+<!-- TOTAL -->
+
+<table class="totals">
+
+<tr>
+<td class="label">
+Jumlah
+</td>
+
+<td class="value">
+{{ number_format($subtotal,0,',','.') }}
+</td>
+</tr>
+
+<tr>
+<td class="label">
+Discount {{ $discountPercent }}%
+</td>
+
+<td class="value">
+{{ number_format($discount,0,',','.') }}
+</td>
+</tr>
+
+<tr>
+<td class="label">
+Total
+</td>
+
+<td class="value">
+{{ number_format($total,0,',','.') }}
+</td>
+</tr>
+
+<tr>
+<td class="label">
+DPP Lain
+</td>
+
+<td class="value">
+{{ number_format($dppLain,0,',','.') }}
+</td>
+</tr>
+
+<tr>
+<td class="label">
+PPN 12%
+</td>
+
+<td class="value">
+{{ number_format($ppn,0,',','.') }}
+</td>
+</tr>
+
+<tr class="grand">
+
+<td class="label">
+Grand Total
+</td>
+
+<td class="value">
+{{ number_format($grandTotal,0,',','.') }}
+</td>
+
+</tr>
+
+</table>
+
+<!-- TERMS -->
+
+<div class="terms">
+
+<div class="terms-label">
+Term / Condition
+</div>
+
+<div class="terms-colon">
+:
+</div>
+
+<div class="terms-value">
+{{ optional($po->vendor)->payment_term ?: '-' }}
+</div>
+
+</div>
+
+<!-- REMARKS -->
+
+<div class="remarks">
+
+<div class="remarks-title">
+Catatan :
+</div>
+
+<div class="remark">
+- Pengiriman Barang Paling Lambat 3 Hari Setelah PO Diterbitkan Kepada Pihak Supplier / Vendor
+</div>
+
+<div class="remark">
+- Barang Akan Kami Kembalikan Apabila Tidak Sesuai Dengan Pesanan (PO)
+</div>
+
+<div class="remark">
+- Semua Pengiriman Barang Harus Disertakan Dengan Nota / Faktur Dan Kwitansi
+</div>
+
+<div class="remark">
+- Nomor PO Harus Dicantumkan Dalam Invoice
+</div>
+
+</div>
+
+<!-- SIGNATURE -->
+
+<div class="signature">
+
+<div class="signature-box">
+
+<div class="signature-title">
+Dibuat Oleh :
+</div>
+
+<div class="signature-name">
+{{ $po->sign_dibuat ?: '' }}
+</div>
+
+<div class="signature-role">
+Purchasing
+</div>
+
+</div>
+
+
+<div class="signature-box">
+
+<div class="signature-title">
+Disetujui Oleh :
+</div>
+
+<div class="signature-name">
+{{ $po->sign_disetujui ?: '' }}
+</div>
+
+<div class="signature-role">
+Direktur
+</div>
+
+</div>
+
+</div>
+
+<!-- FOOTER -->
+
+<div class="footer">
+
+<div class="distribution">
+Distribusi: 1. Pemasok (Supplier), 2. Keuangan &amp; Akuntansi, 3. Arsip
+</div>
+
+<div class="disclaimer">
+Dokumen ini milik PT. BCK, isi dari dokumen ini tidak diperkenankan untuk digandakan atau disalin baik seluruh atau sebagian tanpa izin tertulis dari PT. BCK.
+</div>
+
+</div>
+
+</div>
+</div>
 
 </body>
 </html>

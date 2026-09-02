@@ -34,6 +34,7 @@ $router->get('/', function () use ($router) {
     $router->get('print-pdf/stock-barang-qr-code', 'PrintPdfController@printStockQRCode');
     $router->get('print-pdf/sppb/{id}', 'PrintPdfController@printSppb');
     $router->get('print-pdf/po/{id}', 'PrintPdfController@printPo');
+    $router->get('print-pdf/rfq', 'PrintPdfController@printRfq');
     // $router->get('print-pdf/spl', 'PrintPdfController@printSpl');
 
     $router->get('barang-masuk/cek-material', 'BarangMasukController@cekMaterial');
@@ -45,7 +46,12 @@ $router->post('spb/create', 'SpbController@store');
 $router->post('spb/approve/{id}', 'SpbController@approve');
 $router->post('spb/item-condition/{itemId}', 'SpbController@addItemCondition');
 $router->post('spb/item-condition/select/{conditionId}', 'SpbController@selectItemCondition');
+$router->post('spb/item-request-vendor/{itemId}', 'SpbController@requestVendor');
+$router->post('spb/item-request-vendor/remove/{requestedVendorId}', 'SpbController@unrequestVendor');
+$router->post('spb/lanjut-penawaran/{id}', 'SpbController@lanjutPenawaran');
 $router->post('spb/disposisi/{id}', 'SpbController@disposisi');
+$router->post('spb/save-signature/{id}', 'SpbController@saveSignature');
+$router->post('spb/purchase-order/save-signature/{poId}', 'SpbController@savePoSignature');
 $router->post('spb/po/resolusi/{poId}', 'SpbController@resolusiPo');
 $router->post('spb/po/invoice/{poId}', 'SpbController@invoicePo');
 $router->post('spb/po/payment/{poId}', 'SpbController@paymentPo');

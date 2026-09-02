@@ -169,7 +169,7 @@
         </td>
         <td class="catatan-col">
           <h6>Catatan :</h6>
-          <p>Barang Dibutuhkan Pada Tanggal ........../........../{{ date('Y') }}</p>
+          <p>Barang Dibutuhkan Pada Tanggal {{ $spb->needed_date ? \Carbon\Carbon::parse($spb->needed_date)->format('d/m/Y') : '........../........../' . date('Y') }}</p>
           <p>Untuk Pengadaan Barang Paling Cepat 3 Hari Kerja</p>
           <p>dan Terhitung Dari Tanggal Penerbitan PO</p>
         </td>
@@ -186,7 +186,7 @@
         </td>
         <td style="width: 34%;">
           <div class="sign-title">Ditinjau Oleh,</div>
-          <div class="sign-name">&nbsp;</div>
+          <div class="sign-name">{{ $spb->ditinjau_oleh ?: '' }}</div>
           <div class="sign-role">Manager Dept.</div>
         </td>
         <td style="width: 33%;">

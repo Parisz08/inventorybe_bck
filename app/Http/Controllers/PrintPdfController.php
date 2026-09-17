@@ -58,7 +58,13 @@ class PrintPdfController extends Controller
             $item->min_stock    = $stock ? $stock->min_stock : null;
         }
 
-        return view('pdf.sppb', compact('spb'));
+        // Format nomor ringkas buat preview (SPPB-0023), ambil segmen angka urut
+        // paling belakang dari no_spb asli (SPPB-20260908-0023) tanpa mengubah data aslinya.
+        $lastDash    = strrpos($spb->no_spb, '-');
+        $shortNumber = $lastDash !== false ? substr($spb->no_spb, $lastDash + 1) : $spb->no_spb;
+        $noSpbShort  = 'SPPB-' . $shortNumber;
+
+        return view('pdf.sppb', compact('spb', 'noSpbShort'));
     }
 
     public function printPo($id)
@@ -87,14 +93,20 @@ class PrintPdfController extends Controller
         // DPP Lain = Total x (11/12)
         // PPN 12% = DPP Lain x 12%
         // Grand Total = Total + PPN
-        $discountPercent = 0;
+        // PPh persentase diisi manual oleh Purchasing (nilainya ditampilkan di recap, tidak mengubah Grand Total).
+        $discountPercent = $po->discount_percent ?? 0;
         $discount         = $subtotal * ($discountPercent / 100);
         $total            = $subtotal - $discount;
         $dppLain          = $total * (11 / 12);
-        $ppn              = $dppLain * 0.12;
+
+        $ppnPercent       = $po->ppn_percent ?? 12;
+        $ppn              = $dppLain * ($ppnPercent / 100);
         $grandTotal       = $total + $ppn;
 
-        return view('pdf.po', compact('po', 'subtotal', 'discountPercent', 'discount', 'total', 'dppLain', 'ppn', 'grandTotal'));
+        $pphPercent       = $po->pph_percent ?? 0;
+        $pph              = $dppLain * ($pphPercent / 100);
+
+        return view('pdf.po', compact('po', 'subtotal', 'discountPercent', 'discount', 'total', 'dppLain', 'ppn', 'ppnPercent', 'grandTotal', 'pphPercent', 'pph'));
     }
 
     public function printSuratBarangKeluar(Request $request)

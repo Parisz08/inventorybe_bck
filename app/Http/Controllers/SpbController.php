@@ -19,6 +19,22 @@ class SpbController extends Controller
 {
     use LoggedUser;
 
+    /**
+     * Ambil nomor urut berikutnya untuk sebuah key (misal 'spb-20260907') secara atomik,
+     * aman dari race condition walau 2 request masuk bersamaan. Row di tabel
+     * sequence_counters otomatis ter-lock oleh MySQL selama UPDATE berjalan.
+     */
+    private function nextSequenceNumber($key)
+    {
+        \Illuminate\Support\Facades\DB::statement(
+            'INSERT INTO sequence_counters (seq_key, counter, created_at, updated_at) VALUES (?, 1, NOW(), NOW())
+             ON DUPLICATE KEY UPDATE counter = LAST_INSERT_ID(counter + 1), updated_at = NOW()',
+            [$key]
+        );
+
+        return (int) \Illuminate\Support\Facades\DB::getPdo()->lastInsertId();
+    }
+
     public function index(Request $request)
     {
         $query = Spb::with('items', 'purchaseOrders')->orderBy('created_at', 'desc');
@@ -50,6 +66,28 @@ class SpbController extends Controller
             $stock = StockBarang::where('material_code', $item->material_code)->first();
             $item->actual_stock = $stock ? $stock->stock_barang : null;
             $item->min_stock    = $stock ? $stock->min_stock : null;
+
+            // Riwayat harga terakhir per vendor untuk material yang sama (dari SPB manapun,
+            // termasuk yang ini sendiri), supaya Purchasing bisa auto-isi harga kalau vendor
+            // yang sama pernah kasih penawaran untuk barang yang sama sebelumnya.
+            $lastPrices = [];
+            if ($item->material_code) {
+                $vendorIds = $item->requestedVendors->pluck('vendor_id')->filter()->unique()->values();
+                if ($vendorIds->count()) {
+                    $histories = SpbItemCondition::whereIn('vendor_id', $vendorIds)
+                        ->whereHas('item', function ($q) use ($item) {
+                            $q->where('material_code', $item->material_code);
+                        })
+                        ->orderBy('created_at', 'desc')
+                        ->get(['vendor_id', 'price']);
+                    foreach ($histories as $h) {
+                        if (!array_key_exists($h->vendor_id, $lastPrices)) {
+                            $lastPrices[$h->vendor_id] = $h->price;
+                        }
+                    }
+                }
+            }
+            $item->last_prices = $lastPrices;
         }
 
         return Responses::sendResponse($data, 'SPB Detail Retrieved Successfully');
@@ -75,7 +113,10 @@ class SpbController extends Controller
         $userData = $this->get();
         $user     = $userData['user'];
 
-        $noSpb = 'SPPB-' . date('Ymd') . '-' . str_pad(Spb::whereDate('created_at', date('Y-m-d'))->count() + 1, 4, '0', STR_PAD_LEFT);
+        // Nomor SPPB digenerate atomik lewat tabel sequence_counters, jadi aman
+        // walau ada 2 request masuk bersamaan (tidak akan pernah ketabrak).
+        $seqNumber = $this->nextSequenceNumber('spb-' . date('Ymd'));
+        $noSpb     = 'SPPB-' . date('Ymd') . '-' . str_pad($seqNumber, 4, '0', STR_PAD_LEFT);
 
         $spb = Spb::create([
     'no_spb'        => $noSpb,
@@ -90,6 +131,16 @@ class SpbController extends Controller
     'created_by'    => $user->full_name,
     'updated_by'    => $user->full_name,
 ]);
+
+        // Simpan needed_date lewat query UPDATE terpisah sebagai jaring pengaman,
+        // supaya nilainya tetap kesimpan meski karena sebab apapun kolom ini gagal
+        // ikut ter-insert bareng kolom lain di query create() di atas.
+        if ($request->filled('needed_date')) {
+            \Illuminate\Support\Facades\DB::table('spb')
+                ->where('id', $spb->id)
+                ->update(['needed_date' => $request->input('needed_date')]);
+            $spb->refresh();
+        }
 
         foreach ($items as $item) {
             SpbItem::create([
@@ -151,47 +202,52 @@ class SpbController extends Controller
      * Tandai vendor yang diminta memberi penawaran untuk 1 BARANG tertentu (belum ada harga).
      * Hanya Purchasing. Hanya boleh selama SPB berstatus "Permintaan Vendor".
      */
-    public function requestVendor(Request $request, $itemId)
+        public function requestVendor(Request $request, $itemId)
     {
         $userData = $this->get();
         $user     = $userData['user'];
-
+ 
         if ($user->role != 'Purchasing') {
             return Responses::sendError([], 'Hanya Purchasing yang bisa meminta penawaran vendor');
         }
-
-        $validator = app('validator')->make($request->all(), ['vendor_id' => 'required|integer']);
+ 
+        $validator = app('validator')->make($request->all(), ['vendor_name' => 'required']);
         if ($validator->fails()) {
             return Responses::sendError($validator->errors(), 'Validasi Gagal');
         }
-
+ 
         $item = SpbItem::find($itemId);
         if (!$item) {
             return Responses::sendError([], 'Item SPB Not Found');
         }
-
+ 
         $spb = Spb::find($item->spb_id);
         if (!$spb || $spb->status != 'Permintaan Vendor') {
             return Responses::sendError([], 'SPB harus berstatus Permintaan Vendor untuk meminta penawaran');
         }
-
-        $vendor = Vendor::find($request->input('vendor_id'));
+ 
+        $vendorName = trim($request->input('vendor_name'));
+ 
+        // Cari vendor yang sudah ada di master data (case-insensitive), kalau tidak ada, buat baru otomatis.
+        $vendor = Vendor::whereRaw('LOWER(name) = ?', [strtolower($vendorName)])->first();
         if (!$vendor) {
-            return Responses::sendError([], 'Vendor Not Found');
+            $vendor = Vendor::create([
+                'name' => $vendorName,
+            ]);
         }
-
+ 
         $exists = SpbItemRequestedVendor::where('spb_item_id', $item->id)
                     ->where('vendor_id', $vendor->id)->first();
         if ($exists) {
             return Responses::sendResponse($exists->load('vendor'), 'Vendor Sudah Diminta Sebelumnya');
         }
-
+ 
         $requested = SpbItemRequestedVendor::create([
             'spb_item_id'  => $item->id,
             'vendor_id'    => $vendor->id,
             'requested_by' => $user->full_name,
         ]);
-
+ 
         return Responses::sendResponse($requested->load('vendor'), 'Vendor Berhasil Diminta Untuk Memberi Penawaran');
     }
 
@@ -310,6 +366,45 @@ class SpbController extends Controller
     }
 
     /**
+     * Edit harga/catatan penawaran vendor yang SUDAH ADA (bukan tambah baru).
+     * Hanya Purchasing, hanya selama SPB masih berstatus "Permintaan Pengadaan".
+     * Dipakai kalau salah input harga sebelumnya.
+     */
+    public function updateItemCondition(Request $request, $conditionId)
+    {
+        $validator = app('validator')->make($request->all(), [
+            'price' => 'required|numeric|min:0',
+        ]);
+        if ($validator->fails()) {
+            return Responses::sendError($validator->errors(), 'Validasi Gagal');
+        }
+
+        $userData = $this->get();
+        $user     = $userData['user'];
+
+        if ($user->role != 'Purchasing') {
+            return Responses::sendError([], 'Hanya Purchasing yang bisa mengubah penawaran vendor');
+        }
+
+        $condition = SpbItemCondition::find($conditionId);
+        if (!$condition) {
+            return Responses::sendError([], 'Penawaran Vendor Not Found');
+        }
+
+        $item = SpbItem::find($condition->spb_item_id);
+        $spb  = $item ? Spb::find($item->spb_id) : null;
+        if (!$spb || $spb->status != 'Permintaan Pengadaan') {
+            return Responses::sendError([], 'SPB harus berstatus Permintaan Pengadaan untuk mengubah penawaran');
+        }
+
+        $condition->price          = $request->input('price');
+        $condition->condition_note = $request->input('condition_note');
+        $condition->save();
+
+        return Responses::sendResponse($condition->load('vendor'), 'Penawaran Vendor Berhasil Diubah');
+    }
+
+    /**
      * Checklist vendor pemenang UNTUK 1 BARANG. Hanya Purchasing. Hanya boleh 1 vendor terpilih per barang.
      */
     public function selectItemCondition(Request $request, $conditionId)
@@ -362,17 +457,6 @@ class SpbController extends Controller
 
         $disposisi = $request->input('disposisi');
 
-        if ($disposisi) {
-            $signValidator = app('validator')->make($request->all(), [
-                'diajukan_oleh' => 'required',
-            ], [
-                'diajukan_oleh.required' => 'Nama Diajukan Oleh (Manager Dept.) wajib diisi sebelum PO bisa diterbitkan',
-            ]);
-            if ($signValidator->fails()) {
-                return Responses::sendError($signValidator->errors(), 'Validasi Gagal');
-            }
-        }
-
         $spb = Spb::with('items.conditions')->find($id);
         if (!$spb) {
             return Responses::sendError([], 'SPB Not Found');
@@ -414,28 +498,62 @@ class SpbController extends Controller
             $multiple   = count($groups) > 1;
             $index      = 1;
 
-            foreach ($groups as $group) {
-                $poNumber = $multiple ? ($baseNumber . '-' . $index) : $baseNumber;
+            // Ambil PO yang sudah ada untuk SPB ini yang statusnya masih "PO Diterbitkan" (belum
+            // diproses lebih lanjut / belum ada Receipt-Invoice-Payment). Ini dipakai supaya kalau
+            // Purchasing sempat Mundur Tahap lalu konfirmasi ulang, PO yang sama diUPDATE, bukan
+            // dibuatkan PO baru yang menumpuk jadi dobel.
+            $existingOpenPos = SpbPurchaseOrder::where('spb_id', $spb->id)
+                ->where('status', 'PO Diterbitkan')
+                ->get()
+                ->keyBy('vendor_id');
 
-                $po = SpbPurchaseOrder::create([
-                    'spb_id'        => $spb->id,
-                    'vendor_id'     => $group['vendor_id'],
-                    'supplier'      => $group['supplier'],
-                    'diajukan_oleh' => $request->input('diajukan_oleh'),
-                    'po_number'     => $poNumber,
-                    'po_date'       => date('Y-m-d'),
-                    'po_total'      => $group['total'],
-                    'status'        => 'PO Diterbitkan',
-                    'updated_by'    => $user->full_name,
-                ]);
+            $usedPoIds = [];
+
+            foreach ($groups as $group) {
+                $existingPo = $existingOpenPos->get($group['vendor_id']);
+
+                if ($existingPo) {
+                    // Vendor ini sudah punya PO dari konfirmasi sebelumnya (dan belum diproses) -> update saja
+                    $existingPo->supplier   = $group['supplier'];
+                    $existingPo->po_total   = $group['total'];
+                    $existingPo->status     = 'PO Diterbitkan';
+                    $existingPo->updated_by = $user->full_name;
+                    $existingPo->save();
+                    $po = $existingPo;
+                } else {
+                    $poNumber = $multiple ? ($baseNumber . '-' . $index) : $baseNumber;
+
+                    $po = SpbPurchaseOrder::create([
+                        'spb_id'        => $spb->id,
+                        'vendor_id'     => $group['vendor_id'],
+                        'supplier'      => $group['supplier'],
+                        'diajukan_oleh' => $request->input('diajukan_oleh'),
+                        'po_number'     => $poNumber,
+                        'po_date'       => date('Y-m-d'),
+                        'po_total'      => $group['total'],
+                        'status'        => 'PO Diterbitkan',
+                        'updated_by'    => $user->full_name,
+                    ]);
+
+                    $index++;
+                }
 
                 foreach ($group['items'] as $item) {
                     $item->spb_purchase_order_id = $po->id;
                     $item->save();
                 }
 
-                $index++;
+                $usedPoIds[] = $po->id;
             }
+
+            // PO lama yang statusnya masih "PO Diterbitkan" tapi vendornya sudah tidak dipilih lagi
+            // di konfirmasi ini (belum ada progress apa pun) dianggap draft basi -> dibuang supaya
+            // tidak menumpuk sebagai PO kosong/ganda. PO yang sudah lanjut ke Resolusi/Invoice/Selesai
+            // TIDAK disentuh sama sekali.
+            SpbPurchaseOrder::where('spb_id', $spb->id)
+                ->where('status', 'PO Diterbitkan')
+                ->whereNotIn('id', $usedPoIds)
+                ->delete();
 
             $spb->status = 'PO Diterbitkan';
         } else {
@@ -452,6 +570,121 @@ class SpbController extends Controller
             ? 'Vendor final terpilih untuk semua barang. ' . count($groups) . ' Purchase Order berhasil diterbitkan otomatis.'
             : 'Kembali ke Permintaan Pengadaan';
         return Responses::sendResponse($spb->load('items.conditions.vendor', 'purchaseOrders.items'), $message);
+    }
+
+    /**
+     * Mundur 1 tahap ke status sebelumnya, KHUSUS di ranah Purchasing.
+     * Tidak menghapus data apa pun (barang, penawaran vendor, kondisi harga,
+     * maupun PO yang sudah terlanjur diterbitkan) — hanya mengembalikan status
+     * SPB supaya Purchasing bisa mengulang/mengoreksi tahap sebelumnya.
+     * Tidak berlaku untuk status di ranah Admin (Menunggu Approval / Ditolak)
+     * maupun status akhir (Selesai).
+     */
+    public function mundur($id)
+    {
+        $userData = $this->get();
+        $user     = $userData['user'];
+
+        if ($user->role != 'Purchasing') {
+            return Responses::sendError([], 'Hanya Purchasing yang bisa memundurkan tahap SPB');
+        }
+
+        $spb = Spb::with('purchaseOrders')->find($id);
+        if (!$spb) {
+            return Responses::sendError([], 'SPB Not Found');
+        }
+
+        $previousStatus = [
+            'Permintaan Pengadaan' => 'Permintaan Vendor',
+            'PO Diterbitkan'       => 'Permintaan Pengadaan',
+        ];
+
+        if (!isset($previousStatus[$spb->status])) {
+            return Responses::sendError([], 'Tahap SPB saat ini tidak bisa dimundurkan');
+        }
+
+        // Kalau mau mundur dari "PO Diterbitkan" ke "Permintaan Pengadaan" (Finalisasi Vendor,
+        // misal karena harga/vendor yang dipilih salah), pastikan belum ada PO yang sudah
+        // progress lebih jauh (Resolusi/Invoice/Selesai). Kalau dibiarkan, SPB bisa balik ke
+        // tahap pilih vendor padahal ada PO yang barangnya sudah diterima/dibayar.
+        if ($spb->status === 'PO Diterbitkan') {
+            $hasProgressed = $spb->purchaseOrders->contains(function ($po) {
+                return in_array($po->status, ['Resolusi', 'Invoice', 'Selesai']);
+            });
+            if ($hasProgressed) {
+                return Responses::sendError([], 'Tidak bisa mundur ke Finalisasi Vendor karena sudah ada PO yang masuk tahap Resolusi/Invoice/Selesai. Mundurkan PO tersebut dulu (lewat tombol Mundur yang sama) sampai balik ke PO Diterbitkan.');
+            }
+
+            // Semua PO yang masih di "PO Diterbitkan" (belum ada Receipt/Invoice/Payment
+            // sama sekali) dianggap draft yang batal terbit begitu SPB mundur ke Finalisasi
+            // Vendor -> dihapus, supaya SPB beneran balik ke kondisi "belum ada PO" dan
+            // gak nyangkut kayak dokumen resmi padahal SPB-nya bilang belum final.
+            foreach ($spb->purchaseOrders as $po) {
+                if ($po->status === 'PO Diterbitkan') {
+                    SpbItem::where('spb_purchase_order_id', $po->id)->update(['spb_purchase_order_id' => null]);
+                    $po->delete();
+                }
+            }
+        }
+
+        $spb->status     = $previousStatus[$spb->status];
+        $spb->updated_by = $user->full_name;
+        $spb->save();
+
+        return Responses::sendResponse(
+            $spb->load('items.conditions.vendor', 'items.requestedVendors.vendor', 'purchaseOrders.items'),
+            'SPB Berhasil Dimundurkan ke Tahap ' . $spb->status
+        );
+    }
+
+    /**
+     * Mundur 1 tahap KHUSUS untuk status internal 1 Purchase Order (Resolusi/Invoice/Selesai),
+     * dipakai kalau Purchasing salah catat Receipt/Invoice/Payment dan perlu koreksi.
+     * Tidak menghapus data (resolusi_note, invoice_*, payment_* yang sudah terlanjur
+     * diisi tetap ada, cuma status PO yang mundur supaya formnya bisa diisi ulang).
+     * Tidak berlaku untuk status "PO Diterbitkan" (itu levelnya SPB, pakai endpoint mundur() di atas).
+     */
+    public function mundurPo($poId)
+    {
+        $userData = $this->get();
+        $user     = $userData['user'];
+
+        if ($user->role != 'Purchasing') {
+            return Responses::sendError([], 'Hanya Purchasing yang bisa memundurkan tahap PO');
+        }
+
+        $po = SpbPurchaseOrder::find($poId);
+        if (!$po) {
+            return Responses::sendError([], 'Purchase Order Not Found');
+        }
+
+        $previousStatus = [
+            'Resolusi' => 'PO Diterbitkan',
+            'Invoice'  => 'Resolusi',
+            'Selesai'  => 'Invoice',
+        ];
+
+        if (!isset($previousStatus[$po->status])) {
+            return Responses::sendError([], 'Tahap PO saat ini tidak bisa dimundurkan');
+        }
+
+        $wasSelesai      = $po->status === 'Selesai';
+        $po->status      = $previousStatus[$po->status];
+        $po->updated_by  = $user->full_name;
+        $po->save();
+
+        // Kalau PO ini yang bikin SPB keseluruhan ikut ditandai "Selesai", dan sekarang
+        // dimundurkan, SPB juga harus balik ke "PO Diterbitkan" (belum semua PO kelar lagi).
+        if ($wasSelesai) {
+            $spb = Spb::find($po->spb_id);
+            if ($spb && $spb->status === 'Selesai') {
+                $spb->status     = 'PO Diterbitkan';
+                $spb->updated_by = $user->full_name;
+                $spb->save();
+            }
+        }
+
+        return Responses::sendResponse($po, 'PO Berhasil Dimundurkan ke Tahap ' . $po->status);
     }
 
     /**
@@ -510,6 +743,66 @@ class SpbController extends Controller
         $spb->save();
 
         return Responses::sendResponse($spb, 'Nama Tanda Tangan SPPB Berhasil Disimpan');
+    }
+
+    /**
+     * Simpan persentase Discount & PPh untuk 1 Purchase Order. Hanya Purchasing.
+     * Dipakai di recap kecil (PO No / Up / Discount / PPN / PPh) pada preview PO.
+     */
+    public function updatePoTax(Request $request, $poId)
+    {
+        // Kalau field angka dikirim kosong ("" bukan beneran null), Laravel nganggep itu
+        // "ada isinya" jadi tetap kena validasi numeric dan gagal. Diseragamkan dulu jadi
+        // null supaya aturan "nullable" beneran jalan.
+        $numericFields = ['discount_percent', 'ppn_percent', 'pph_percent'];
+        $normalized    = [];
+        foreach ($numericFields as $field) {
+            $value = $request->input($field);
+            $normalized[$field] = ($value === '' || $value === null) ? null : $value;
+        }
+        $request->merge($normalized);
+
+        $validator = app('validator')->make($request->all(), [
+            'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'ppn_percent'      => 'nullable|numeric|min:0|max:100',
+            'pph_percent'      => 'nullable|numeric|min:0|max:100',
+            'up_name'          => 'nullable|string|max:255',
+            'no_sppb_manual'   => 'nullable|string|max:255',
+        ]);
+        if ($validator->fails()) {
+            return Responses::sendError($validator->errors(), 'Validasi Gagal');
+        }
+
+        $userData = $this->get();
+        $user     = $userData['user'];
+
+        if ($user->role != 'Purchasing') {
+            return Responses::sendError([], 'Hanya Purchasing yang bisa mengubah Discount/PPN/PPh PO');
+        }
+
+        $po = SpbPurchaseOrder::find($poId);
+        if (!$po) {
+            return Responses::sendError([], 'Purchase Order Not Found');
+        }
+
+        // Discount/PPN/PPh mencerminkan syarat yang sudah dicetak & dikirim ke vendor.
+        // Begitu PO lewat dari "PO Diterbitkan" (sudah masuk Resolusi/Invoice/Selesai),
+        // nilainya dikunci supaya dokumen yang sudah beredar tidak jadi tidak sinkron.
+        if ($po->status !== 'PO Diterbitkan') {
+            return Responses::sendError([], 'Discount, PPN & PPh tidak bisa diubah lagi setelah PO masuk tahap Resolusi/Invoice/Payment');
+        }
+
+        $po->discount_percent = $request->input('discount_percent');
+        $po->ppn_percent      = $request->input('ppn_percent');
+        $po->pph_percent      = $request->input('pph_percent');
+        $po->up_name          = $request->input('up_name');
+        $po->no_sppb_manual   = $request->input('no_sppb_manual');
+        $po->tax_updated_by   = $user->full_name;
+        $po->tax_updated_at   = \Carbon\Carbon::now();
+        $po->updated_by       = $user->full_name;
+        $po->save();
+
+        return Responses::sendResponse($po, 'Discount, PPN, PPh & Info PO Berhasil Disimpan');
     }
 
     /**

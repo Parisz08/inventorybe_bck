@@ -90,7 +90,7 @@
 <body>
 
   <div class="no-print">
-    <button class="primary" onclick="window.print()">🖨️ Print / Simpan sebagai PDF</button>
+    <button class="primary" onclick="window.print()">Print / Simpan sebagai PDF</button>
     <button onclick="window.close()">Tutup</button>
   </div>
 
@@ -105,9 +105,9 @@
         </td>
         <td style="width: 230px;">
           <table class="req-box">
-            <tr><td class="label">Req. No.</td><td class="sep">:</td><td>{{ $spb->no_spb }}</td></tr>
+            <tr><td class="label">Req. No.</td><td class="sep">:</td><td>{{ $noSpbShort }}</td></tr>
             <tr><td class="label">Divisi</td><td class="sep">:</td><td>{{ $spb->divisi }}</td></tr>
-            <tr><td class="label">Tanggal</td><td class="sep">:</td><td>{{ \Carbon\Carbon::parse($spb->request_date)->format('d-m-Y') }}</td></tr>
+            <tr><td class="label">Tanggal</td><td class="sep">:</td><td>{{ $spb->approved_at ? \Carbon\Carbon::parse($spb->approved_at)->format('d-m-Y') : '-' }}</td></tr>
           </table>
         </td>
       </tr>
@@ -181,17 +181,17 @@
       <tr>
         <td style="width: 33%;">
           <div class="sign-title">Diajukan Oleh,</div>
-          <div class="sign-name">{{ $spb->created_by }}</div>
+          <div class="sign-name">{{ $spb->sign_diajukan ?: '' }}</div>
           <div class="sign-role">User</div>
         </td>
         <td style="width: 34%;">
           <div class="sign-title">Ditinjau Oleh,</div>
-          <div class="sign-name">{{ $spb->ditinjau_oleh ?: '' }}</div>
+          <div class="sign-name">{{ $spb->sign_ditinjau ?: '' }}</div>
           <div class="sign-role">Manager Dept.</div>
         </td>
         <td style="width: 33%;">
           <div class="sign-title">Disetujui Oleh,</div>
-          <div class="sign-name">{{ $spb->approved_by ?: '' }}</div>
+          <div class="sign-name">{{ $spb->sign_disetujui ?: '' }}</div>
           <div class="sign-role">Direktur</div>
         </td>
       </tr>

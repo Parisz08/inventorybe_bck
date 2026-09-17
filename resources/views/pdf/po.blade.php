@@ -166,7 +166,16 @@ table.top-info{
     padding:.65mm 0;
     vertical-align:top;
     font-size:7.5px;
-    border-bottom:none !important; /* Semua garis di bagian ini dihilangkan */
+}
+
+.top-label,
+.top-colon{
+    border-bottom:none !important;
+}
+
+.top-value{
+    border-bottom:.8px solid #000;
+    padding-bottom:.3mm;
 }
 
 .top-label{
@@ -332,16 +341,20 @@ table.items{
 }
 
 .items .name{
-    width:47%;
+    width:31%;
+}
+
+.items .merek{
+    width:16%;
 }
 
 .items .qty{
-    width:9%;
+    width:8%;
     text-align:center;
 }
 
 .items .unit{
-    width:9%;
+    width:8%;
     text-align:center;
 }
 
@@ -351,7 +364,7 @@ table.items{
 }
 
 .items .total{
-    width:16%;
+    width:18%;
     text-align:right;
 }
 
@@ -584,7 +597,7 @@ table.totals{
 
 <div class="no-print">
     <button class="primary" onclick="window.print()">
-        🖨️ Print / Simpan sebagai PDF
+        Print / Simpan sebagai PDF
     </button>
 
     <button onclick="window.close()">
@@ -680,7 +693,7 @@ table.totals{
 <td class="top-label" style="width: 22mm;">Up</td>
 <td class="top-colon">:</td>
 <td class="top-value">
-    {{ $po->sign_dibuat ?: '' }}
+    {{ $po->up_name ?: ($po->sign_dibuat ?: '') }}
 </td>
 </tr>
 
@@ -758,7 +771,7 @@ Office
 </div>
 
 <div class="division-small">
-SPPB - {{ optional($po->spb)->no_spb ?: '-' }}
+SPPB - {{ $po->no_sppb_manual ?: (optional($po->spb)->no_spb ?: '-') }}
 </div>
 
 </div>
@@ -850,6 +863,10 @@ No.
 Nama Barang
 </th>
 
+<th class="merek">
+Merek
+</th>
+
 <th class="qty">
 Jumlah
 </th>
@@ -886,12 +903,12 @@ Jumlah Harga
 
 {{ $item->material_name }}
 
-@if($item->merek)
-    (Merk {{ $item->merek }})
-@endif
-
 </div>
 
+</td>
+
+<td class="merek">
+{{ $item->merek ?: '-' }}
 </td>
 
 <td class="qty">
@@ -924,6 +941,8 @@ Jumlah Harga
 </td>
 
 <td class="name"></td>
+
+<td class="merek"></td>
 
 <td class="qty"></td>
 
@@ -961,6 +980,7 @@ Jumlah
 </td>
 </tr>
 
+@if($discountPercent > 0)
 <tr>
 <td class="label">
 Discount {{ $discountPercent }}%
@@ -970,6 +990,7 @@ Discount {{ $discountPercent }}%
 {{ number_format($discount,0,',','.') }}
 </td>
 </tr>
+@endif
 
 <tr>
 <td class="label">
@@ -993,13 +1014,25 @@ DPP Lain
 
 <tr>
 <td class="label">
-PPN 12%
+PPN {{ rtrim(rtrim(number_format($ppnPercent,2,',','.'), '0'), ',') ?: '0' }}%
 </td>
 
 <td class="value">
 {{ number_format($ppn,0,',','.') }}
 </td>
 </tr>
+
+@if($pphPercent > 0)
+<tr>
+<td class="label">
+PPh (Jasa) {{ rtrim(rtrim(number_format($pphPercent,2,',','.'), '0'), ',') ?: '0' }}%
+</td>
+
+<td class="value">
+{{ number_format($pph,0,',','.') }}
+</td>
+</tr>
+@endif
 
 <tr class="grand">
 

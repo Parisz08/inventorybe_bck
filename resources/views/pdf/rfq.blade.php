@@ -321,7 +321,7 @@ table.signature .sign-role{
 <body>
 
 <div class="no-print">
-    <button class="primary" onclick="window.print()">🖨️ Print / Simpan sebagai PDF</button>
+    <button class="primary" onclick="window.print()">Print / Simpan sebagai PDF</button>
     <button onclick="window.close()">Tutup</button>
 </div>
 

@@ -60,9 +60,21 @@ $router->post('spb/po/resolusi/{poId}', 'SpbController@resolusiPo');
 $router->post('spb/po/invoice/{poId}', 'SpbController@invoicePo');
 $router->post('spb/po/payment/{poId}', 'SpbController@paymentPo');
 $router->post('spb/delete/{id}', 'SpbController@destroy');
+$router->post('spb/update/{id}', 'SpbController@update');
+$router->post('spb/cancel/{id}', 'SpbController@cancel');
+
+// NOTIFICATIONS
+$router->get('notification/index', 'NotificationController@index');
+$router->get('notification/unread-count', 'NotificationController@unreadCount');
+$router->post('notification/read/{id}', 'NotificationController@markRead');
+$router->post('notification/read-all', 'NotificationController@markAllRead');
 
 // VENDOR
 $router->get('vendor/index', 'VendorController@index');
+$router->get('vendor/show/{id}', 'VendorController@show');
+$router->post('vendor/create', 'VendorController@store');
+$router->post('vendor/update/{id}', 'VendorController@update');
+$router->post('vendor/delete/{id}', 'VendorController@destroy');
 
     // DASHBOARD
     $router->get('dashboard/index', 'DashboardController@index');

@@ -17,12 +17,11 @@ class AddPpnPercentToSpbPurchaseOrders extends Migration
 
         // discount_percent & pph_percent sebelumnya default 0 (bukan NULL), sehingga
         // tidak bisa dibedakan antara "belum pernah diisi" vs "sengaja diisi 0".
-        // Diubah jadi default NULL, dan baris yang masih 0 bawaan (belum pernah
-        // disimpan manual) dikosongkan lagi.
-        Schema::table('spb_purchase_orders', function (Blueprint $table) {
-            $table->decimal('discount_percent', 5, 2)->nullable()->default(null)->change();
-            $table->decimal('pph_percent', 5, 2)->nullable()->default(null)->change();
-        });
+        // Diubah jadi default NULL. Dipakai raw SQL (bukan ->change() bawaan Blueprint)
+        // supaya TIDAK perlu install package "doctrine/dbal" tambahan yang beresiko
+        // bentrok versi di project Lumen versi lama seperti ini.
+        DB::statement('ALTER TABLE spb_purchase_orders MODIFY discount_percent DECIMAL(5,2) NULL DEFAULT NULL');
+        DB::statement('ALTER TABLE spb_purchase_orders MODIFY pph_percent DECIMAL(5,2) NULL DEFAULT NULL');
 
         DB::table('spb_purchase_orders')->where('discount_percent', 0)->update(['discount_percent' => null]);
         DB::table('spb_purchase_orders')->where('pph_percent', 0)->update(['pph_percent' => null]);

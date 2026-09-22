@@ -12,12 +12,15 @@ use App\StockBarang;
 use App\Vendor;
 use App\Http\Library\Responses;
 use App\Http\Traits\LoggedUser;
+use App\Http\Traits\NotifiesUsers;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
 class SpbController extends Controller
 {
     use LoggedUser;
+    use NotifiesUsers;
 
     /**
      * Ambil nomor urut berikutnya untuk sebuah key (misal 'spb-20260907') secara atomik,
@@ -26,13 +29,20 @@ class SpbController extends Controller
      */
     private function nextSequenceNumber($key)
     {
-        \Illuminate\Support\Facades\DB::statement(
-            'INSERT INTO sequence_counters (seq_key, counter, created_at, updated_at) VALUES (?, 1, NOW(), NOW())
+        // PENTING: value awal "1" DIBUNGKUS LAST_INSERT_ID(1) juga (bukan cuma di baris
+        // ON DUPLICATE KEY UPDATE-nya). Tabel sequence_counters gak punya kolom
+        // auto-increment sendiri (cuma seq_key sebagai primary key), jadi kalau baris "1"
+        // di klausa INSERT gak dibungkus LAST_INSERT_ID(), maka pas SPPB PERTAMA di hari
+        // itu dibuat (baris baru, bukan lewat jalur UPDATE), MySQL gak nge-set nilai
+        // LAST_INSERT_ID() dengan benar — hasilnya PDO::lastInsertId() balik ke 0, bukan 1.
+        // Makanya sebelum fix ini, SPPB pertama tiap harinya kena bug jadi "-0000".
+        DB::statement(
+            'INSERT INTO sequence_counters (seq_key, counter, created_at, updated_at) VALUES (?, LAST_INSERT_ID(1), NOW(), NOW())
              ON DUPLICATE KEY UPDATE counter = LAST_INSERT_ID(counter + 1), updated_at = NOW()',
             [$key]
         );
 
-        return (int) \Illuminate\Support\Facades\DB::getPdo()->lastInsertId();
+        return (int) DB::getPdo()->lastInsertId();
     }
 
     public function index(Request $request)
@@ -129,6 +139,7 @@ class SpbController extends Controller
     'request_date'  => date('Y-m-d'),
     'status'        => 'Menunggu Approval',
     'created_by'    => $user->full_name,
+    'created_by_user_id' => $user->id,
     'updated_by'    => $user->full_name,
 ]);
 
@@ -156,7 +167,148 @@ class SpbController extends Controller
             ]);
         }
 
+        // Admin gak akan tahu ada SPPB baru yang nunggu di-approve kecuali dia buka
+        // aplikasi sendiri, jadi begitu SPPB diajukan, langsung kirim notifikasi ke
+        // SEMUA akun Admin supaya mereka tahu ada yang perlu diproses.
+        $this->notifyRole(
+            'Admin',
+            'spb_created',
+            'SPPB Baru Menunggu Approval',
+            'SPPB ' . $noSpb . ' diajukan oleh ' . $user->full_name . ' (' . ($request->input('divisi') ?: '-') . ') dan menunggu persetujuan Anda.',
+            $spb->id
+        );
+
         return Responses::sendResponse($spb->load('items'), 'SPB Created Successfully');
+    }
+
+    /**
+     * Edit SPPB yang MASIH menunggu approval. Hanya boleh oleh user yang mengajukan
+     * SPPB itu sendiri (bukan Admin/Purchasing), dan hanya selama status masih
+     * "Menunggu Approval" — begitu sudah diproses (disetujui/ditolak/dst), isi
+     * SPPB tidak boleh diubah lagi lewat sini supaya riwayatnya tetap konsisten
+     * dengan apa yang sebenarnya di-approve.
+     */
+    public function update(Request $request, $id)
+    {
+        $spb = Spb::find($id);
+        if (!$spb) {
+            return Responses::sendError([], 'SPB Not Found');
+        }
+
+        $userData = $this->get();
+        $user     = $userData['user'];
+
+        if (!$spb->created_by_user_id || (int) $spb->created_by_user_id !== (int) $user->id) {
+            return Responses::sendError([], 'Hanya pengaju SPPB ini yang bisa mengedit');
+        }
+
+        if ($spb->status != 'Menunggu Approval') {
+            return Responses::sendError([], 'SPPB sudah diproses (disetujui/ditolak), tidak bisa diedit lagi. Hubungi Admin jika ada perubahan.');
+        }
+
+        $items = $request->input('items', []);
+
+        $validator = app('validator')->make($request->all(), [
+            'items'                  => 'required|array|min:1',
+            'items.*.material_name'  => 'required',
+            'items.*.qty'            => 'required|integer|min:1',
+            'needed_date'            => 'required|date',
+            'sign_diajukan'          => 'required',
+            'sign_ditinjau'          => 'required',
+            'sign_disetujui'         => 'required',
+        ], []);
+        if ($validator->fails()) {
+            return Responses::sendError($validator->errors(), 'Validasi Gagal');
+        }
+
+        $spb->divisi         = $request->input('divisi');
+        $spb->keperluan      = $request->input('keperluan');
+        $spb->sign_diajukan  = $request->input('sign_diajukan');
+        $spb->sign_ditinjau  = $request->input('sign_ditinjau');
+        $spb->sign_disetujui = $request->input('sign_disetujui');
+        $spb->updated_by     = $user->full_name;
+        $spb->save();
+
+        // needed_date disimpan lewat query UPDATE terpisah, konsisten dengan pola yang
+        // sudah dipakai di store() supaya tidak ada kasus kolom ini gagal ikut ter-update.
+        \Illuminate\Support\Facades\DB::table('spb')
+            ->where('id', $spb->id)
+            ->update(['needed_date' => $request->input('needed_date')]);
+
+        // Barang belum mungkin punya vendor/kondisi/PO terkait selama status masih
+        // "Menunggu Approval" (tahapan itu baru mulai setelah disetujui), jadi aman untuk
+        // hapus semua item lama dan gantikan dengan daftar baru dari form edit.
+        SpbItem::where('spb_id', $spb->id)->delete();
+        foreach ($items as $item) {
+            SpbItem::create([
+                'spb_id'        => $spb->id,
+                'material_code' => $item['material_code'] ?? null,
+                'kategori'      => $item['kategori'] ?? null,
+                'material_name' => $item['material_name'],
+                'merek'         => $item['merek'] ?? null,
+                'specification' => $item['specification'] ?? null,
+                'qty'           => $item['qty'],
+                'unit'          => $item['unit'] ?? null,
+                'note'          => $item['note'] ?? null,
+            ]);
+        }
+
+        $spb->refresh();
+
+        // Isi SPPB berubah setelah Admin mungkin sempat lihat versi sebelumnya, jadi
+        // Admin perlu tahu supaya gak approve versi yang sudah usang di kepala mereka.
+        $this->notifyRole(
+            'Admin',
+            'spb_updated',
+            'SPPB Diedit Oleh Pengaju',
+            'SPPB ' . $spb->no_spb . ' diedit oleh ' . $user->full_name . '. Mohon cek ulang isinya sebelum approve.',
+            $spb->id
+        );
+
+        return Responses::sendResponse($spb->load('items'), 'SPPB Berhasil Diubah');
+    }
+
+    /**
+     * Batalkan SPPB yang diajukan sendiri, SELAMA masih menunggu approval.
+     * Beda dari destroy() (hapus permanen, khusus Admin): ini soft — cuma ganti
+     * status jadi "Dibatalkan" oleh pengaju sendiri, datanya tetap ada sebagai riwayat.
+     */
+    public function cancel(Request $request, $id)
+    {
+        $spb = Spb::find($id);
+        if (!$spb) {
+            return Responses::sendError([], 'SPB Not Found');
+        }
+
+        $userData = $this->get();
+        $user     = $userData['user'];
+
+        $isOwner = $spb->created_by_user_id && (int) $spb->created_by_user_id === (int) $user->id;
+        if (!$isOwner && $user->role != 'Admin') {
+            return Responses::sendError([], 'Hanya pengaju SPPB ini (atau Admin) yang bisa membatalkannya');
+        }
+
+        if ($spb->status != 'Menunggu Approval') {
+            return Responses::sendError([], 'SPPB sudah diproses, tidak bisa dibatalkan lagi lewat sini');
+        }
+
+        $spb->status       = 'Dibatalkan';
+        $spb->cancelled_by = $user->full_name;
+        $spb->cancelled_at = Carbon::now();
+        $spb->updated_by   = $user->full_name;
+        $spb->save();
+
+        // Admin gak perlu lagi buka & cek SPPB ini karena sudah dibatalkan duluan
+        // oleh pengajunya sebelum sempat di-approve.
+        $this->notifyRole(
+            'Admin',
+            'spb_cancelled',
+            'SPPB Dibatalkan Oleh Pengaju',
+            'SPPB ' . $spb->no_spb . ' dibatalkan oleh ' . $user->full_name . ' sebelum sempat di-approve.',
+            $spb->id
+        );
+
+        return Responses::sendResponse($spb, 'SPPB Berhasil Dibatalkan');
     }
 
     /**
@@ -193,6 +345,37 @@ class SpbController extends Controller
         $spb->status        = $approve ? 'Permintaan Vendor' : 'Ditolak';
         $spb->updated_by    = $user->full_name;
         $spb->save();
+
+        if ($approve) {
+            // Purchasing gak akan tahu ada SPPB baru yang siap dicarikan vendor kecuali
+            // dia buka aplikasi sendiri, jadi begitu Admin approve, langsung notifikasi
+            // SEMUA akun Purchasing.
+            $this->notifyRole(
+                'Purchasing',
+                'spb_approved',
+                'SPPB Siap Dicarikan Vendor',
+                'SPPB ' . $spb->no_spb . ' sudah disetujui ' . $user->full_name . ' dan siap masuk tahap Permintaan Vendor.',
+                $spb->id
+            );
+            $this->notifyUser(
+                $spb->created_by_user_id,
+                'spb_approved',
+                'SPPB Anda Disetujui',
+                'SPPB ' . $spb->no_spb . ' yang Anda ajukan telah disetujui oleh ' . $user->full_name . '.',
+                $spb->id
+            );
+        } else {
+            // Requester juga gak tahu SPPB-nya ditolak kalau gak dikasih tahu — biar
+            // gak perlu buka & cek satu-satu apakah sudah ada progress atau belum.
+            $note = $request->input('approval_note');
+            $this->notifyUser(
+                $spb->created_by_user_id,
+                'spb_rejected',
+                'SPPB Anda Ditolak',
+                'SPPB ' . $spb->no_spb . ' ditolak oleh ' . $user->full_name . '.' . ($note ? ' Catatan: ' . $note : ''),
+                $spb->id
+            );
+        }
 
         $message = $approve ? 'SPB Approved, lanjut ke Permintaan Vendor' : 'SPB Ditolak';
         return Responses::sendResponse($spb, $message);
@@ -566,6 +749,19 @@ class SpbController extends Controller
         $spb->updated_by     = $user->full_name;
         $spb->save();
 
+        if ($disposisi) {
+            // Requester nunggu tanpa tahu progress SPPB-nya sudah sampai mana — begitu PO
+            // terbit (artinya barangnya beneran mau dibeli), kabari dia supaya gak perlu
+            // buka aplikasi & cek manual satu-satu.
+            $this->notifyUser(
+                $spb->created_by_user_id,
+                'po_issued',
+                'PO Untuk SPPB Anda Sudah Terbit',
+                'Purchase Order untuk SPPB ' . $spb->no_spb . ' sudah diterbitkan (' . count($groups) . ' PO) oleh ' . $user->full_name . '. Barang sedang dalam proses pengadaan.',
+                $spb->id
+            );
+        }
+
         $message = $disposisi
             ? 'Vendor final terpilih untuk semua barang. ' . count($groups) . ' Purchase Order berhasil diterbitkan otomatis.'
             : 'Kembali ke Permintaan Pengadaan';
@@ -712,6 +908,18 @@ class SpbController extends Controller
         $po->status        = 'Resolusi';
         $po->updated_by    = $user->full_name;
         $po->save();
+
+        $spb = Spb::find($po->spb_id);
+        if ($spb) {
+            $this->notifyUser(
+                $spb->created_by_user_id,
+                'po_received',
+                'Barang SPPB Anda Sudah Diterima',
+                'Barang untuk PO ' . $po->po_number . ' (SPPB ' . $spb->no_spb . ') sudah diterima/dicocokkan oleh ' . $user->full_name . '.',
+                $spb->id,
+                $po->id
+            );
+        }
 
         return Responses::sendResponse($po, 'Resolusi Berhasil Dicatat');
     }
@@ -869,6 +1077,18 @@ class SpbController extends Controller
         $po->updated_by     = $user->full_name;
         $po->save();
 
+        $spb = Spb::find($po->spb_id);
+        if ($spb) {
+            $this->notifyUser(
+                $spb->created_by_user_id,
+                'po_invoiced',
+                'Invoice Untuk SPPB Anda Tercatat',
+                'Invoice untuk PO ' . $po->po_number . ' (SPPB ' . $spb->no_spb . ') sudah dicatat, menunggu proses pembayaran.',
+                $spb->id,
+                $po->id
+            );
+        }
+
         return Responses::sendResponse($po, 'Invoice Berhasil Dicatat');
     }
 
@@ -913,12 +1133,29 @@ class SpbController extends Controller
         // Kalau semua PO di SPB ini sudah Selesai, SPB keseluruhan ikut ditandai Selesai
         $spb = Spb::find($po->spb_id);
         if ($spb) {
+            $this->notifyUser(
+                $spb->created_by_user_id,
+                'po_paid',
+                'Pembayaran PO SPPB Anda Selesai',
+                'Pembayaran untuk PO ' . $po->po_number . ' (SPPB ' . $spb->no_spb . ') sudah selesai dicatat oleh ' . $user->full_name . '.',
+                $spb->id,
+                $po->id
+            );
+
             $belumSelesai = $spb->purchaseOrders()->where('status', '!=', 'Selesai')->count();
             if ($belumSelesai == 0) {
                 $spb->status     = 'Selesai';
                 $spb->updated_by = $user->full_name;
                 $spb->save();
                 $message = 'Pembayaran Berhasil Dicatat. Semua PO sudah Selesai, SPB ditandai Selesai.';
+
+                $this->notifyUser(
+                    $spb->created_by_user_id,
+                    'spb_selesai',
+                    'SPPB Anda Selesai',
+                    'Semua Purchase Order untuk SPPB ' . $spb->no_spb . ' sudah selesai (dibayar). Proses pengadaan tuntas.',
+                    $spb->id
+                );
             }
         }
 

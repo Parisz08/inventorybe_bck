@@ -34,14 +34,19 @@ $router->get('/', function () use ($router) {
     $router->get('print-pdf/stock-barang-qr-code', 'PrintPdfController@printStockQRCode');
     $router->get('print-pdf/sppb/{id}', 'PrintPdfController@printSppb');
     $router->get('print-pdf/po/{id}', 'PrintPdfController@printPo');
+    $router->get('print-pdf/perbandingan-harga/{id}', 'PrintPdfController@printPerbandinganHarga');
     $router->get('print-pdf/rfq', 'PrintPdfController@printRfq');
     // $router->get('print-pdf/spl', 'PrintPdfController@printSpl');
 
     $router->get('barang-masuk/cek-material', 'BarangMasukController@cekMaterial');
+
+    // FILE STORAGE (foto barang, invoice, payment) - jalan tanpa perlu symlink public/storage
+    $router->get('file', 'PrintPdfController@serveStorageFile');
 // ================================= FOR LOGIN ==========================================================
 $router->group(['middleware' => 'jwt.tymon'], function () use ($router){
     $router->get('spb/index', 'SpbController@index');
 $router->get('spb/show/{id}', 'SpbController@show');
+$router->get('spb/po/search', 'SpbController@searchPo');
 $router->post('spb/create', 'SpbController@store');
 $router->post('spb/approve/{id}', 'SpbController@approve');
 $router->post('spb/item-condition/{itemId}', 'SpbController@addItemCondition');

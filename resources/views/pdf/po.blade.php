@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{ $po->po_number }}</title>
+<title>{{ $po->po_number }}{{ $po->po_number_suffix ? '-' . $po->po_number_suffix : '' }}</title>
 
 <style>
 @page{
@@ -677,7 +677,7 @@ table.totals{
 <td class="top-label" style="width: 22mm;">PO No.</td>
 <td class="top-colon">:</td>
 <td class="top-value">
-    {{ $po->po_number }}
+    {{ $po->po_number }}{{ $po->po_number_suffix ? '/' . $po->po_number_suffix : '' }}
 </td>
 </tr>
 
@@ -831,7 +831,7 @@ Dasar Acuan No. PP / Kontrak /<br>
 </div>
 
 <div class="reference-value">
-{{ data_get($po,'reference_no') ?: data_get($po,'contract_no') ?: optional($po->spb)->no_spb ?: '-' }}
+&nbsp;
 </div>
 
 </td>
@@ -988,6 +988,18 @@ Discount {{ $discountPercent }}%
 
 <td class="value">
 {{ number_format($discount,0,',','.') }}
+</td>
+</tr>
+@endif
+
+@if($potonganHarga > 0)
+<tr>
+<td class="label">
+Potongan Harga
+</td>
+
+<td class="value">
+{{ number_format($potonganHarga,0,',','.') }}
 </td>
 </tr>
 @endif

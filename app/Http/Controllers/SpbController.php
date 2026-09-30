@@ -45,6 +45,20 @@ class SpbController extends Controller
         return (int) DB::getPdo()->lastInsertId();
     }
 
+    /**
+     * Kolom spb.po_draft_snapshot (cadangan isian Info PO saat mundur) baru ada setelah SQL
+     * add_po_draft_snapshot.sql dijalankan. Selama kolomnya belum ada, mundur dan terbit PO
+     * tetap jalan normal, cuma isian Info PO tidak dicadangkan.
+     */
+    private function snapshotSupported()
+    {
+        static $supported = null;
+        if ($supported === null) {
+            $supported = DB::getSchemaBuilder()->hasColumn('spb', 'po_draft_snapshot');
+        }
+        return $supported;
+    }
+
     public function index(Request $request)
     {
         $query = Spb::with('items', 'purchaseOrders')->orderBy('created_at', 'desc');
@@ -64,9 +78,37 @@ class SpbController extends Controller
         return Responses::sendResponse($data, 'SPB Retrieved Successfully');
     }
 
+    /**
+     * Cari PO berdasarkan No. PO (partial match), lintas semua SPPB.
+     * Berguna kalau PO-nya sudah "tenggelam" karena banyaknya SPPB yang sudah diajukan.
+     */
+    public function searchPo(Request $request)
+    {
+        $poNumber = trim($request->input('po_number'));
+
+        if (empty($poNumber)) {
+            return Responses::sendError([], 'No. PO wajib diisi');
+        }
+
+        $data = SpbPurchaseOrder::with('vendor', 'spb')
+            ->where(function ($q) use ($poNumber) {
+                $q->where('po_number', 'like', '%' . $poNumber . '%')
+                  ->orWhere('po_number_suffix', 'like', '%' . $poNumber . '%');
+            })
+            ->orderBy('created_at', 'desc')
+            ->limit(50)
+            ->get();
+
+        if ($data->isEmpty()) {
+            return Responses::sendError([], 'PO Not Found');
+        }
+
+        return Responses::sendResponse($data, 'PO Retrieved Successfully');
+    }
+
     public function show($id)
     {
-        $data = Spb::with('items.conditions.vendor', 'items.requestedVendors.vendor', 'items.purchaseOrder', 'purchaseOrders.items')->find($id);
+        $data = Spb::with('items.conditions.vendor', 'items.requestedVendors.vendor', 'items.purchaseOrder', 'purchaseOrders.items.conditions')->find($id);
 
         if (!$data) {
             return Responses::sendError([], 'SPB Not Found');
@@ -100,6 +142,27 @@ class SpbController extends Controller
             $item->last_prices = $lastPrices;
         }
 
+        // Grand Total tiap PO (dipakai buat auto-isi jumlah Invoice di FE, dan sebagai
+        // referensi tampilan). Formula ini PERSIS sama dengan yang dipakai di preview
+        // cetak PO (PrintPdfController@printPo), supaya angkanya selalu konsisten.
+        foreach ($data->purchaseOrders as $po) {
+            $subtotal = 0;
+            foreach ($po->items as $item) {
+                $condition = $item->conditions->firstWhere('selected', true);
+                $subtotal += ($condition ? $condition->price : 0) * $item->qty;
+            }
+            $discountPercent = $po->discount_percent ?? 0;
+            $discount        = $subtotal * ($discountPercent / 100);
+            $potonganHarga   = $po->potongan_harga ?? 0;
+            $total           = $subtotal - $discount - $potonganHarga;
+            $dppLain         = $total * (11 / 12);
+            $ppnPercent      = $po->ppn_percent ?? 12;
+            $ppn             = $dppLain * ($ppnPercent / 100);
+
+            $po->subtotal    = $subtotal;
+            $po->grand_total = $total + $ppn;
+        }
+
         return Responses::sendResponse($data, 'SPB Detail Retrieved Successfully');
     }
 
@@ -111,7 +174,7 @@ class SpbController extends Controller
     'items'            => 'required|array|min:1',
     'items.*.material_name' => 'required',
     'items.*.qty'      => 'required|integer|min:1',
-    'needed_date'    => 'required|date',
+    'needed_date'    => 'required|date|after_or_equal:today',
     'sign_diajukan'  => 'required',
     'sign_ditinjau'  => 'required',
     'sign_disetujui' => 'required',
@@ -212,7 +275,7 @@ class SpbController extends Controller
             'items'                  => 'required|array|min:1',
             'items.*.material_name'  => 'required',
             'items.*.qty'            => 'required|integer|min:1',
-            'needed_date'            => 'required|date',
+            'needed_date'            => 'required|date|after_or_equal:today',
             'sign_diajukan'          => 'required',
             'sign_ditinjau'          => 'required',
             'sign_disetujui'         => 'required',
@@ -651,8 +714,16 @@ class SpbController extends Controller
         $groups    = [];
 
         if ($disposisi) {
+            // Barang yang sudah tercatat di PO yang sudah lanjut (Receipt/Invoice/Payment)
+            // tidak boleh ikut dikelompokkan ulang, supaya PO itu tidak kehilangan barangnya
+            // atau dibuatkan PO ganda. Yang diproses cuma barang yang belum punya PO
+            // (termasuk barang dari PO yang tadi dimundurkan/dibatalkan).
+            $openItems = $spb->items->filter(function ($item) {
+                return !$item->spb_purchase_order_id;
+            });
+
             // Pastikan SEMUA barang sudah punya vendor terpilih
-            foreach ($spb->items as $item) {
+            foreach ($openItems as $item) {
                 $hasSelected = $item->conditions->contains(function ($c) {
                     return $c->selected;
                 });
@@ -662,7 +733,7 @@ class SpbController extends Controller
             }
 
             // Kelompokkan barang berdasarkan vendor pemenang masing-masing
-            foreach ($spb->items as $item) {
+            foreach ($openItems as $item) {
                 $selected = $item->conditions->firstWhere('selected', true);
                 $vendorId = $selected->vendor_id ?: 0;
                 if (!isset($groups[$vendorId])) {
@@ -677,9 +748,10 @@ class SpbController extends Controller
                 $groups[$vendorId]['total']   += ($selected->price * $item->qty);
             }
 
-            $baseNumber = str_replace('SPPB-', 'PO-', $spb->no_spb);
-            $multiple   = count($groups) > 1;
-            $index      = 1;
+            // Nomor PO sekarang angka urut GLOBAL sederhana (463, 464, ...), sesuai format fisik
+            // perusahaan "463/BCK-RETAIL/PO/VIII/2026" — bagian setelah angka (BCK-RETAIL/PO/VIII/2026)
+            // diisi manual belakangan oleh Purchasing lewat po_number_suffix, bukan digenerate otomatis.
+            // Nomor ini digenerate atomik lewat tabel sequence_counters, sama seperti no_spb.
 
             // Ambil PO yang sudah ada untuk SPB ini yang statusnya masih "PO Diterbitkan" (belum
             // diproses lebih lanjut / belum ada Receipt-Invoice-Payment). Ini dipakai supaya kalau
@@ -692,33 +764,58 @@ class SpbController extends Controller
 
             $usedPoIds = [];
 
+            // Cadangan isian Info PO dari PO yang sempat dibatalkan lewat tombol mundur (per vendor)
+            $snapshot = $this->snapshotSupported()
+                ? (json_decode($spb->po_draft_snapshot ?: '[]', true) ?: [])
+                : [];
+
             foreach ($groups as $group) {
                 $existingPo = $existingOpenPos->get($group['vendor_id']);
 
                 if ($existingPo) {
                     // Vendor ini sudah punya PO dari konfirmasi sebelumnya (dan belum diproses) -> update saja
-                    $existingPo->supplier   = $group['supplier'];
-                    $existingPo->po_total   = $group['total'];
-                    $existingPo->status     = 'PO Diterbitkan';
-                    $existingPo->updated_by = $user->full_name;
+                    $existingPo->supplier       = $group['supplier'];
+                    $existingPo->po_total       = $group['total'];
+                    $existingPo->status         = 'PO Diterbitkan';
+                    $existingPo->sign_dibuat    = 'Randy';
+                    $existingPo->sign_disetujui = 'Robinan';
+                    $existingPo->updated_by     = $user->full_name;
                     $existingPo->save();
                     $po = $existingPo;
                 } else {
-                    $poNumber = $multiple ? ($baseNumber . '-' . $index) : $baseNumber;
+                    $snapKey  = (string) ($group['vendor_id'] ?: 0);
+                    $restored = isset($snapshot[$snapKey]) ? $snapshot[$snapKey] : null;
 
-                    $po = SpbPurchaseOrder::create([
-                        'spb_id'        => $spb->id,
-                        'vendor_id'     => $group['vendor_id'],
-                        'supplier'      => $group['supplier'],
-                        'diajukan_oleh' => $request->input('diajukan_oleh'),
-                        'po_number'     => $poNumber,
-                        'po_date'       => date('Y-m-d'),
-                        'po_total'      => $group['total'],
-                        'status'        => 'PO Diterbitkan',
-                        'updated_by'    => $user->full_name,
-                    ]);
+                    // Kalau vendor ini pernah punya PO yang dibatalkan lewat mundur, pakai lagi
+                    // nomor PO dan isian Info PO-nya. Kalau belum pernah, baru ambil nomor urut baru.
+                    $poNumber = $restored && !empty($restored['po_number'])
+                        ? $restored['po_number']
+                        : (string) $this->nextSequenceNumber('po_number');
 
-                    $index++;
+                    $attributes = [
+                        'spb_id'         => $spb->id,
+                        'vendor_id'      => $group['vendor_id'],
+                        'supplier'       => $group['supplier'],
+                        'diajukan_oleh'  => $request->input('diajukan_oleh'),
+                        'po_number'      => $poNumber,
+                        'po_date'        => date('Y-m-d'),
+                        'po_total'       => $group['total'],
+                        'status'         => 'PO Diterbitkan',
+                        'sign_dibuat'    => 'Randy',
+                        'sign_disetujui' => 'Robinan',
+                        'updated_by'     => $user->full_name,
+                    ];
+
+                    if ($restored) {
+                        foreach (['po_number_suffix', 'discount_percent', 'potongan_harga', 'ppn_percent', 'pph_percent', 'up_name', 'no_sppb_manual', 'tax_updated_by', 'tax_updated_at'] as $field) {
+                            if (array_key_exists($field, $restored)) {
+                                $attributes[$field] = $restored[$field];
+                            }
+                        }
+                        unset($snapshot[$snapKey]);
+                    }
+
+                    $po = SpbPurchaseOrder::create($attributes);
                 }
 
                 foreach ($group['items'] as $item) {
@@ -738,6 +835,9 @@ class SpbController extends Controller
                 ->whereNotIn('id', $usedPoIds)
                 ->delete();
 
+            if ($this->snapshotSupported()) {
+                $spb->po_draft_snapshot = empty($snapshot) ? null : json_encode($snapshot);
+            }
             $spb->status = 'PO Diterbitkan';
         } else {
             $spb->status = 'Permintaan Pengadaan';
@@ -800,26 +900,48 @@ class SpbController extends Controller
         }
 
         // Kalau mau mundur dari "PO Diterbitkan" ke "Permintaan Pengadaan" (Finalisasi Vendor,
-        // misal karena harga/vendor yang dipilih salah), pastikan belum ada PO yang sudah
-        // progress lebih jauh (Resolusi/Invoice/Selesai). Kalau dibiarkan, SPB bisa balik ke
-        // tahap pilih vendor padahal ada PO yang barangnya sudah diterima/dibayar.
+        // misal karena harga/vendor yang dipilih salah): PO lain yang sudah progress
+        // (Resolusi/Invoice/Selesai) TIDAK menghalangi, selama MASIH ADA minimal 1 PO yang
+        // belum diapa-apain (masih persis "PO Diterbitkan" / masih tahap isi info PO).
+        // PO yang sudah progress itu tetap dibiarkan apa adanya, tidak ikut disentuh.
         if ($spb->status === 'PO Diterbitkan') {
-            $hasProgressed = $spb->purchaseOrders->contains(function ($po) {
-                return in_array($po->status, ['Resolusi', 'Invoice', 'Selesai']);
+            $hasReversible = $spb->purchaseOrders->contains(function ($po) {
+                return $po->status === 'PO Diterbitkan';
             });
-            if ($hasProgressed) {
-                return Responses::sendError([], 'Tidak bisa mundur ke Finalisasi Vendor karena sudah ada PO yang masuk tahap Resolusi/Invoice/Selesai. Mundurkan PO tersebut dulu (lewat tombol Mundur yang sama) sampai balik ke PO Diterbitkan.');
+            if (!$hasReversible) {
+                return Responses::sendError([], 'Semua PO sudah lanjut dari tahap pengisian info PO. Mundurkan dulu salah satu PO lewat tombol panah di kartu PO-nya, baru bisa mundur ke Penawaran Harga Vendor.');
             }
 
             // Semua PO yang masih di "PO Diterbitkan" (belum ada Receipt/Invoice/Payment
             // sama sekali) dianggap draft yang batal terbit begitu SPB mundur ke Finalisasi
             // Vendor -> dihapus, supaya SPB beneran balik ke kondisi "belum ada PO" dan
             // gak nyangkut kayak dokumen resmi padahal SPB-nya bilang belum final.
+            // TAPI isian Info PO-nya (nomor PO, format manual, Discount, Potongan Harga, PPN,
+            // PPh, Up, No. SPPB) disimpan dulu per vendor di spb.po_draft_snapshot, supaya begitu
+            // PO untuk vendor yang sama diterbitkan lagi, Purchasing tidak perlu isi ulang.
+            $snapshot = $this->snapshotSupported()
+                ? (json_decode($spb->po_draft_snapshot ?: '[]', true) ?: [])
+                : [];
             foreach ($spb->purchaseOrders as $po) {
                 if ($po->status === 'PO Diterbitkan') {
+                    $snapshot[(string) ($po->vendor_id ?: 0)] = [
+                        'po_number'        => $po->po_number,
+                        'po_number_suffix' => $po->po_number_suffix,
+                        'discount_percent' => $po->discount_percent,
+                        'potongan_harga'   => $po->potongan_harga,
+                        'ppn_percent'      => $po->ppn_percent,
+                        'pph_percent'      => $po->pph_percent,
+                        'up_name'          => $po->up_name,
+                        'no_sppb_manual'   => $po->no_sppb_manual,
+                        'tax_updated_by'   => $po->tax_updated_by,
+                        'tax_updated_at'   => $po->tax_updated_at,
+                    ];
                     SpbItem::where('spb_purchase_order_id', $po->id)->update(['spb_purchase_order_id' => null]);
                     $po->delete();
                 }
+            }
+            if ($this->snapshotSupported()) {
+                $spb->po_draft_snapshot = json_encode($snapshot);
             }
         }
 
@@ -962,7 +1084,7 @@ class SpbController extends Controller
         // Kalau field angka dikirim kosong ("" bukan beneran null), Laravel nganggep itu
         // "ada isinya" jadi tetap kena validasi numeric dan gagal. Diseragamkan dulu jadi
         // null supaya aturan "nullable" beneran jalan.
-        $numericFields = ['discount_percent', 'ppn_percent', 'pph_percent'];
+        $numericFields = ['discount_percent', 'potongan_harga', 'ppn_percent', 'pph_percent'];
         $normalized    = [];
         foreach ($numericFields as $field) {
             $value = $request->input($field);
@@ -972,10 +1094,12 @@ class SpbController extends Controller
 
         $validator = app('validator')->make($request->all(), [
             'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'potongan_harga'   => 'nullable|numeric|min:0',
             'ppn_percent'      => 'nullable|numeric|min:0|max:100',
             'pph_percent'      => 'nullable|numeric|min:0|max:100',
             'up_name'          => 'nullable|string|max:255',
             'no_sppb_manual'   => 'nullable|string|max:255',
+            'po_number_suffix' => 'nullable|string|max:100',
         ]);
         if ($validator->fails()) {
             return Responses::sendError($validator->errors(), 'Validasi Gagal');
@@ -1001,10 +1125,12 @@ class SpbController extends Controller
         }
 
         $po->discount_percent = $request->input('discount_percent');
+        $po->potongan_harga   = $request->input('potongan_harga');
         $po->ppn_percent      = $request->input('ppn_percent');
         $po->pph_percent      = $request->input('pph_percent');
         $po->up_name          = $request->input('up_name');
         $po->no_sppb_manual   = $request->input('no_sppb_manual');
+        $po->po_number_suffix = $request->input('po_number_suffix');
         $po->tax_updated_by   = $user->full_name;
         $po->tax_updated_at   = \Carbon\Carbon::now();
         $po->updated_by       = $user->full_name;
@@ -1050,6 +1176,7 @@ class SpbController extends Controller
             'invoice_number' => 'required',
             'invoice_date'   => 'required',
             'invoice_amount' => 'required|numeric',
+            'invoice_photo'  => 'nullable|file|max:10240',
         ]);
         if ($validator->fails()) {
             return Responses::sendError($validator->errors(), 'Validasi Gagal');
@@ -1073,6 +1200,15 @@ class SpbController extends Controller
         $po->invoice_number = $request->input('invoice_number');
         $po->invoice_date   = $request->input('invoice_date');
         $po->invoice_amount = $request->input('invoice_amount');
+        if ($request->hasFile('invoice_photo')) {
+            $attach    = $request->file('invoice_photo');
+            $original  = $attach->getClientOriginalName();
+            $file      = pathinfo($original, PATHINFO_FILENAME);
+            $extension = pathinfo($original, PATHINFO_EXTENSION);
+            $filename  = $file . '_' . Carbon::now()->format('ymd_his') . '.' . $extension;
+            $attach->move(storage_path('invoice_photo'), $filename);
+            $po->invoice_photo = $filename;
+        }
         $po->status         = 'Invoice';
         $po->updated_by     = $user->full_name;
         $po->save();
@@ -1101,6 +1237,7 @@ class SpbController extends Controller
         $validator = app('validator')->make($request->all(), [
             'payment_date'   => 'required',
             'payment_amount' => 'required|numeric',
+            'payment_photo'  => 'nullable|file|max:10240',
         ]);
         if ($validator->fails()) {
             return Responses::sendError($validator->errors(), 'Validasi Gagal');
@@ -1124,6 +1261,15 @@ class SpbController extends Controller
         $po->payment_date   = $request->input('payment_date');
         $po->payment_amount = $request->input('payment_amount');
         $po->payment_method = $request->input('payment_method');
+        if ($request->hasFile('payment_photo')) {
+            $attach    = $request->file('payment_photo');
+            $original  = $attach->getClientOriginalName();
+            $file      = pathinfo($original, PATHINFO_FILENAME);
+            $extension = pathinfo($original, PATHINFO_EXTENSION);
+            $filename  = $file . '_' . Carbon::now()->format('ymd_his') . '.' . $extension;
+            $attach->move(storage_path('payment_photo'), $filename);
+            $po->payment_photo = $filename;
+        }
         $po->status         = 'Selesai';
         $po->updated_by     = $user->full_name;
         $po->save();

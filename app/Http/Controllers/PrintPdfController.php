@@ -172,11 +172,12 @@ class PrintPdfController extends Controller
             $item->min_stock    = $stock ? $stock->min_stock : null;
         }
 
-        // Format nomor ringkas buat preview (SPPB-0023), ambil segmen angka urut
-        // paling belakang dari no_spb asli (SPPB-20260908-0023) tanpa mengubah data aslinya.
-        $lastDash    = strrpos($spb->no_spb, '-');
-        $shortNumber = $lastDash !== false ? substr($spb->no_spb, $lastDash + 1) : $spb->no_spb;
-        $noSpbShort  = 'SPPB-' . $shortNumber;
+        // Nomor ringkas buat preview (Req. No.), format SPPB-0023.
+        // Sebelumnya diambil dari segmen angka paling belakang no_spb (SPPB-20260908-0023),
+        // padahal angka itu di-reset ke 1 tiap hari, jadi Req. No. sering kembar antar hari.
+        // Sekarang pakai ID SPPB (auto-increment, tidak pernah dipakai ulang), jadi urutannya
+        // berlanjut terus dan unik. Data no_spb asli tidak diubah.
+        $noSpbShort = $spb->no_spb_short;
 
         return view('pdf.sppb', compact('spb', 'noSpbShort'));
     }

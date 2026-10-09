@@ -10,6 +10,7 @@ use Maatwebsite\Excel\Facades\Excel;
 use App\Exports\BarangMasukExport;
 use App\Exports\BarangKeluarExport;
 use App\Exports\StockBarangExport;
+use App\Exports\VendorExport;
 
 class ExportExcelController extends Controller
 {
@@ -30,6 +31,12 @@ class ExportExcelController extends Controller
     {
         set_time_limit(300);
         return Excel::download(new StockBarangExport($request), 'Data Stock Barang.xlsx');
+    }
+
+    public function exportVendor(Request $request)
+    {
+        set_time_limit(300);
+        return Excel::download(new VendorExport($request), 'Data Vendor.xlsx');
     }
 
 }

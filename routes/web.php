@@ -29,6 +29,7 @@ $router->get('/', function () use ($router) {
     $router->get('export-excel/barang-masuk', 'ExportExcelController@exportBarangMasuk');
     $router->get('export-excel/barang-keluar', 'ExportExcelController@exportBarangKeluar');
     $router->get('export-excel/stock-barang', 'ExportExcelController@exportStockBarang');
+    $router->get('export-excel/vendor', 'ExportExcelController@exportVendor');
     // PDF
     $router->get('print-pdf/surat-barang-keluar', 'PrintPdfController@printSuratBarangKeluar');
     $router->get('print-pdf/stock-barang-qr-code', 'PrintPdfController@printStockQRCode');

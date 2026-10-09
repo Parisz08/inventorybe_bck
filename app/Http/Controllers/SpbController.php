@@ -68,9 +68,15 @@ class SpbController extends Controller
             $query->where('status', $status);
         }
 
-        $search = $request->input('search');
-        if (!empty($search)) {
-            $query->where('no_spb', 'like', '%' . $search . '%');
+        $search = trim((string) $request->input('search'));
+        if ($search !== '') {
+            // Nomor singkat seperti yang tampil di tabel: "SPPB-0023", "0023" atau "23" -> cari berdasarkan ID.
+            // Selain itu (mis. nomor panjang SPPB-20260908-0023) dicari sebagai potongan no_spb.
+            if (preg_match('/^(?:sppb-?)?0*(\d{1,9})$/i', $search, $m) && (stripos($search, 'sppb') === 0 || strlen($m[1]) <= 5)) {
+                $query->where('id', (int) $m[1]);
+            } else {
+                $query->where('no_spb', 'like', '%' . $search . '%');
+            }
         }
 
         $data = $query->paginate(10);
@@ -718,8 +724,19 @@ class SpbController extends Controller
             // tidak boleh ikut dikelompokkan ulang, supaya PO itu tidak kehilangan barangnya
             // atau dibuatkan PO ganda. Yang diproses cuma barang yang belum punya PO
             // (termasuk barang dari PO yang tadi dimundurkan/dibatalkan).
-            $openItems = $spb->items->filter(function ($item) {
-                return !$item->spb_purchase_order_id;
+            //
+            // PO draft (status masih "PO Diterbitkan") TIDAK dihapus waktu SPB mundur ke
+            // Penawaran Harga, supaya Info PO yang sudah diisi tetap utuh. Jadi barang yang
+            // masih menempel di PO draft ikut dikelompokkan ulang sesuai vendor terpilih
+            // sekarang: kalau vendornya sama, PO draft yang lama dipakai lagi apa adanya.
+            $draftPoIds = SpbPurchaseOrder::where('spb_id', $spb->id)
+                ->where('status', 'PO Diterbitkan')
+                ->pluck('id')
+                ->all();
+
+            $openItems = $spb->items->filter(function ($item) use ($draftPoIds) {
+                return !$item->spb_purchase_order_id
+                    || in_array($item->spb_purchase_order_id, $draftPoIds);
             });
 
             // Pastikan SEMUA barang sudah punya vendor terpilih
@@ -778,7 +795,7 @@ class SpbController extends Controller
                     $existingPo->po_total       = $group['total'];
                     $existingPo->status         = 'PO Diterbitkan';
                     $existingPo->sign_dibuat    = 'Randy';
-                    $existingPo->sign_disetujui = 'Robinan';
+                    $existingPo->sign_disetujui = 'Robinand';
                     $existingPo->updated_by     = $user->full_name;
                     $existingPo->save();
                     $po = $existingPo;
@@ -802,7 +819,7 @@ class SpbController extends Controller
                         'po_total'       => $group['total'],
                         'status'         => 'PO Diterbitkan',
                         'sign_dibuat'    => 'Randy',
-                        'sign_disetujui' => 'Robinan',
+                        'sign_disetujui' => 'Robinand',
                         'updated_by'     => $user->full_name,
                     ];
 
@@ -830,15 +847,38 @@ class SpbController extends Controller
             // di konfirmasi ini (belum ada progress apa pun) dianggap draft basi -> dibuang supaya
             // tidak menumpuk sebagai PO kosong/ganda. PO yang sudah lanjut ke Resolusi/Invoice/Selesai
             // TIDAK disentuh sama sekali.
-            SpbPurchaseOrder::where('spb_id', $spb->id)
+            $staleDrafts = SpbPurchaseOrder::where('spb_id', $spb->id)
                 ->where('status', 'PO Diterbitkan')
                 ->whereNotIn('id', $usedPoIds)
-                ->delete();
+                ->get();
+            foreach ($staleDrafts as $stale) {
+                // Info PO-nya dicadangkan per vendor, jadi kalau vendor ini dipilih lagi nanti,
+                // nomor PO dan isiannya dipakai lagi (tidak perlu isi ulang).
+                if ($this->snapshotSupported()) {
+                    $snapshot[(string) ($stale->vendor_id ?: 0)] = [
+                        'po_number'        => $stale->po_number,
+                        'po_number_suffix' => $stale->po_number_suffix,
+                        'discount_percent' => $stale->discount_percent,
+                        'potongan_harga'   => $stale->potongan_harga,
+                        'ppn_percent'      => $stale->ppn_percent,
+                        'pph_percent'      => $stale->pph_percent,
+                        'up_name'          => $stale->up_name,
+                        'no_sppb_manual'   => $stale->no_sppb_manual,
+                        'tax_updated_by'   => $stale->tax_updated_by,
+                        'tax_updated_at'   => $stale->tax_updated_at,
+                    ];
+                }
+                $stale->delete();
+            }
 
             if ($this->snapshotSupported()) {
                 $spb->po_draft_snapshot = empty($snapshot) ? null : json_encode($snapshot);
             }
-            $spb->status = 'PO Diterbitkan';
+            // Status SPB mengikuti kondisi PO yang ada: kalau semua PO sudah Selesai (misal SPB
+            // dimundurkan dari Selesai lalu vendor dikonfirmasi lagi), kembali ke Selesai.
+            $hasPo      = SpbPurchaseOrder::where('spb_id', $spb->id)->exists();
+            $hasNotDone = SpbPurchaseOrder::where('spb_id', $spb->id)->where('status', '!=', 'Selesai')->exists();
+            $spb->status = ($hasPo && !$hasNotDone) ? 'Selesai' : 'PO Diterbitkan';
         } else {
             $spb->status = 'Permintaan Pengadaan';
         }
@@ -849,7 +889,7 @@ class SpbController extends Controller
         $spb->updated_by     = $user->full_name;
         $spb->save();
 
-        if ($disposisi) {
+        if ($disposisi && count($groups) > 0) {
             // Requester nunggu tanpa tahu progress SPPB-nya sudah sampai mana — begitu PO
             // terbit (artinya barangnya beneran mau dibeli), kabari dia supaya gak perlu
             // buka aplikasi & cek manual satu-satu.
@@ -862,9 +902,13 @@ class SpbController extends Controller
             );
         }
 
-        $message = $disposisi
-            ? 'Vendor final terpilih untuk semua barang. ' . count($groups) . ' Purchase Order berhasil diterbitkan otomatis.'
-            : 'Kembali ke Permintaan Pengadaan';
+        if ($disposisi) {
+            $message = count($groups) > 0
+                ? 'Vendor final terpilih untuk semua barang. ' . count($groups) . ' Purchase Order berhasil diterbitkan otomatis.'
+                : 'Vendor final dikonfirmasi. Purchase Order yang sudah ada dilanjutkan di tahap terakhirnya.';
+        } else {
+            $message = 'Kembali ke Permintaan Pengadaan';
+        }
         return Responses::sendResponse($spb->load('items.conditions.vendor', 'purchaseOrders.items'), $message);
     }
 
@@ -893,57 +937,20 @@ class SpbController extends Controller
         $previousStatus = [
             'Permintaan Pengadaan' => 'Permintaan Vendor',
             'PO Diterbitkan'       => 'Permintaan Pengadaan',
+            'Selesai'              => 'Permintaan Pengadaan',
         ];
 
         if (!isset($previousStatus[$spb->status])) {
             return Responses::sendError([], 'Tahap SPB saat ini tidak bisa dimundurkan');
         }
 
-        // Kalau mau mundur dari "PO Diterbitkan" ke "Permintaan Pengadaan" (Finalisasi Vendor,
-        // misal karena harga/vendor yang dipilih salah): PO lain yang sudah progress
-        // (Resolusi/Invoice/Selesai) TIDAK menghalangi, selama MASIH ADA minimal 1 PO yang
-        // belum diapa-apain (masih persis "PO Diterbitkan" / masih tahap isi info PO).
-        // PO yang sudah progress itu tetap dibiarkan apa adanya, tidak ikut disentuh.
-        if ($spb->status === 'PO Diterbitkan') {
-            $hasReversible = $spb->purchaseOrders->contains(function ($po) {
-                return $po->status === 'PO Diterbitkan';
-            });
-            if (!$hasReversible) {
-                return Responses::sendError([], 'Semua PO sudah lanjut dari tahap pengisian info PO. Mundurkan dulu salah satu PO lewat tombol panah di kartu PO-nya, baru bisa mundur ke Penawaran Harga Vendor.');
-            }
-
-            // Semua PO yang masih di "PO Diterbitkan" (belum ada Receipt/Invoice/Payment
-            // sama sekali) dianggap draft yang batal terbit begitu SPB mundur ke Finalisasi
-            // Vendor -> dihapus, supaya SPB beneran balik ke kondisi "belum ada PO" dan
-            // gak nyangkut kayak dokumen resmi padahal SPB-nya bilang belum final.
-            // TAPI isian Info PO-nya (nomor PO, format manual, Discount, Potongan Harga, PPN,
-            // PPh, Up, No. SPPB) disimpan dulu per vendor di spb.po_draft_snapshot, supaya begitu
-            // PO untuk vendor yang sama diterbitkan lagi, Purchasing tidak perlu isi ulang.
-            $snapshot = $this->snapshotSupported()
-                ? (json_decode($spb->po_draft_snapshot ?: '[]', true) ?: [])
-                : [];
-            foreach ($spb->purchaseOrders as $po) {
-                if ($po->status === 'PO Diterbitkan') {
-                    $snapshot[(string) ($po->vendor_id ?: 0)] = [
-                        'po_number'        => $po->po_number,
-                        'po_number_suffix' => $po->po_number_suffix,
-                        'discount_percent' => $po->discount_percent,
-                        'potongan_harga'   => $po->potongan_harga,
-                        'ppn_percent'      => $po->ppn_percent,
-                        'pph_percent'      => $po->pph_percent,
-                        'up_name'          => $po->up_name,
-                        'no_sppb_manual'   => $po->no_sppb_manual,
-                        'tax_updated_by'   => $po->tax_updated_by,
-                        'tax_updated_at'   => $po->tax_updated_at,
-                    ];
-                    SpbItem::where('spb_purchase_order_id', $po->id)->update(['spb_purchase_order_id' => null]);
-                    $po->delete();
-                }
-            }
-            if ($this->snapshotSupported()) {
-                $spb->po_draft_snapshot = json_encode($snapshot);
-            }
-        }
+        // Mundur dari "PO Diterbitkan" / "Selesai" ke "Permintaan Pengadaan" (Finalisasi Vendor,
+        // misal karena harga/vendor yang dipilih salah) HANYA mengubah status SPB.
+        // Semua PO dibiarkan persis seperti adanya: Info PO (nomor PO, format, Discount,
+        // Potongan Harga, PPN, PPh, Up, No. SPPB) maupun progres PO (Receipt / Invoice /
+        // Payment) TIDAK dihapus dan TIDAK dimundurkan. Waktu vendor dikonfirmasi lagi lewat
+        // disposisi(), PO untuk vendor yang sama dipakai ulang di tahap terakhirnya.
+        // Kalau ada PO yang memang perlu diulang tahapnya, pakai mundurPo() per PO.
 
         $spb->status     = $previousStatus[$spb->status];
         $spb->updated_by = $user->full_name;
